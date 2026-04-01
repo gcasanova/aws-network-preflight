@@ -1,59 +1,70 @@
 # aws-network-preflight
 
-Declare your AWS network intent in YAML and verify that connectivity still matches it.
+[![CI](https://github.com/gcasanova/aws-network-preflight/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/gcasanova/aws-network-preflight/actions/workflows/ci.yml) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](#installation)
 
-`aws-network-preflight` is an AWS-first CLI for platform, SRE, and networking teams. You describe the paths that must be reachable or must not be reachable, and the tool verifies those expectations using AWS-native analysis.
+Declare allowed and denied AWS connectivity in YAML and verify it with AWS Reachability Analyzer.
 
-This repository is being built in phases. Today, `init`, `validate`, `list-targets`, `run`, and `explain` are implemented for the narrow v1 scope described below.
+`aws-network-preflight` is a CLI for platform, SRE, and networking teams that want to describe expected AWS connectivity in version-controlled YAML and verify it with AWS Reachability Analyzer. It is useful when you need a practical way to catch drift in security groups, routes, and attachments before that drift turns into a broken deployment or an incident.
+
+It is intentionally narrow: v1 focuses on single-region AWS connectivity validation for EC2 instances and ENIs.
 
 ## Why this exists
 
-AWS network posture drifts. Security groups change, routes move, NACLs get tightened, new attachments appear, and what used to work quietly stops working. Teams often notice that drift only after an outage, a failed deployment, or a late-night incident.
+AWS connectivity changes over time. Security groups get edited, routes move, NACLs tighten, new attachments appear, and paths that used to work quietly stop working.
 
-This project aims to make expected connectivity explicit:
+This project exists to make expected connectivity explicit and testable:
 
-- declare intent in version-controlled YAML
-- validate that intent in CI or from a laptop
-- lean on AWS-native analysis instead of hand-wavy heuristics
+- declare intent in YAML
+- verify it locally or in CI
+- use AWS-native analysis instead of hand-built network heuristics
 
-## v1 scope
+## Installation
 
-The first release is intentionally narrow.
+Python 3.11+ is required.
 
-- AWS only
-- CLI first
-- Python 3.11+
-- YAML config
-- single-region-only for v1, using `defaults.region` as the effective region
-- Assertion types:
-  - `allow`
-  - `deny`
-- Analysis engine:
-  - AWS Reachability Analyzer only
-- Selector types:
-  - `resource_id`
-  - `arn`
-  - `tags`
-- Discovery target types supported in v1:
-  - EC2 instances
-  - Elastic Network Interfaces
-- Every selector must resolve to exactly one resource
+Install from source:
 
-For v1, this is intentionally a single-region tool. The effective region comes from `defaults.region`, and configs that imply multi-region behavior are rejected for now. That is a scope choice for a precise first release, not a claim that multi-region support will never exist.
-For v1, discovery is also intentionally limited to the standard commercial AWS partition (`aws`).
+```bash
+git clone https://github.com/gcasanova/aws-network-preflight.git
+cd aws-network-preflight
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
 
-## Current status
+The CLI uses the default AWS credential chain by default, supports `--profile`, and can assume per-account `role_arn` values defined in the config.
 
-The repository now covers the intended narrow v1 flow:
+You will need AWS credentials and permissions that can read the referenced resources and run Reachability Analyzer in the configured accounts.
 
-- `init`: create a starter config and examples
-- `validate`: validate YAML structure and schema
-- `list-targets`: resolve selectors to canonical execution targets
-- `run`: execute all assertions through Reachability Analyzer
-- `explain`: execute one assertion with more detailed output
+## Quick start
 
-The execution backend for v1 is AWS Reachability Analyzer only.
-`run` and `explain` support `--format text|json`, with text as the default.
+Create a starter config:
+
+```bash
+aws-network-preflight init
+```
+
+Validate the starter config to confirm the CLI is installed and working:
+
+```bash
+aws-network-preflight validate -f preflight.yaml
+```
+
+Then edit `preflight.yaml` with your real AWS account details, role ARNs, regions, and selectors before using `list-targets` or `run`.
+
+Resolve the configured targets without running analysis:
+
+```bash
+aws-network-preflight list-targets -f preflight.yaml
+```
+
+Run the assertions:
+
+```bash
+aws-network-preflight run -f preflight.yaml
+```
+
+For CI-friendly output, `run` and `explain` also support `--format json`.
 
 ## Example config
 
@@ -107,19 +118,20 @@ assertions:
     port: 5432
 ```
 
-## CLI usage
+## Example commands and output
+
+Common tasks:
 
 ```bash
-aws-network-preflight init
-aws-network-preflight validate -f preflight.yaml
-aws-network-preflight list-targets -f preflight.yaml
+# run all configured assertions
 aws-network-preflight run -f preflight.yaml
-aws-network-preflight run -f preflight.yaml --format json
-aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow
-aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow --format json
-```
 
-## Example output
+# inspect one assertion in detail
+aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow
+
+# emit machine-readable output for CI
+aws-network-preflight run -f preflight.yaml --format json
+```
 
 Text output from `run`:
 
@@ -136,72 +148,61 @@ Text output from `run`:
 Passed: 1  Failed: 1  Errors: 0
 ```
 
-JSON output from `explain --format json`:
+JSON output from `run --format json`:
 
 ```json
 {
-  "actual_outcome": "not_reachable",
-  "analysis_id": "nia-0123abc456def789",
-  "analysis_status": "succeeded",
-  "assertion_id": "dev-to-prod-db-deny",
-  "assertion_type": "deny",
-  "cleanup": {
-    "analysis_delete_attempted": true,
-    "analysis_delete_succeeded": true,
-    "errors": [],
-    "path_delete_attempted": true,
-    "path_delete_succeeded": true
-  },
-  "expected_outcome": "not_reachable",
-  "message": "Expected not reachable and Reachability Analyzer reported not reachable.",
-  "network_path_found": false,
-  "status": "passed"
+  "error_count": 0,
+  "failed_count": 1,
+  "passed_count": 1,
+  "results": [
+    {
+      "actual_outcome": "reachable",
+      "assertion_id": "dev-to-shared-dns-allow",
+      "expected_outcome": "reachable",
+      "status": "passed"
+    },
+    {
+      "actual_outcome": "reachable",
+      "assertion_id": "dev-to-prod-db-deny",
+      "expected_outcome": "not_reachable",
+      "status": "failed"
+    }
+  ]
 }
 ```
 
-## Exit codes
+Exit codes:
 
 - `0`: all assertions passed
 - `1`: one or more assertions failed
 - `2`: config or validation error
 - `3`: runtime, AWS API, or authentication error
 
-## IAM and auth model
+## Design choices
 
-v1 is designed to work with normal AWS credential flows.
+The scope is intentionally narrow because the goal is a reliable v1, not a vague networking framework.
 
-- default AWS credential chain
-- optional CLI `--profile` override
-- per-account `role_arn` assumption for read-only analysis access
-
-The base credentials need permission to call `sts:AssumeRole` when account roles are used. The assumed role itself will need the read and analysis permissions required by the implementation, including Reachability Analyzer APIs.
-
-## v1 target model
-
-For v1, ENI is the canonical execution target. EC2 instance is still an allowed user-facing input, but it is treated as a convenience input that normalizes to one primary ENI before Reachability Analyzer execution runs.
-
-`list-targets`, `run`, and `explain` all consume the same resolved target model so selector behavior stays consistent across discovery and execution.
-For tag-based selectors, v1 enforces strict uniqueness before normalization. If an EC2 instance and an ENI both match the same tags, that is treated as ambiguous even if the instance would normalize to that same ENI.
+- AWS-first because the tool is built around AWS-native analysis and AWS account boundaries, not generic abstractions.
+- Single-region-only in v1 because discovery and execution are much easier to reason about when every assertion runs in one explicit effective region from `defaults.region`.
+- Reachability Analyzer only in v1 because one trustworthy engine is more useful than several partially-supported analysis modes.
+- ENI as the canonical execution target because it is the most precise AWS networking anchor for path analysis.
+- EC2 instance as a convenience input because it keeps the CLI practical while still normalizing execution to one concrete ENI.
+- Narrow target-family support because public v1 credibility comes from being explicit about what the tool does support, not by implying it solves all of AWS networking.
 
 ## Limitations
 
-The tool is intentionally honest about what it will not do in v1.
+- v1 is single-region-only
+- v1 uses AWS Reachability Analyzer only
+- supported target families are limited to EC2 instances and ENIs
+- selectors must resolve to exactly one supported resource
+- tag ambiguity is a hard failure
+- only the standard commercial AWS partition (`aws`) is supported
+- no Network Access Analyzer, active probes, internet exposure checks, or service-specific logic for TGW, Cloud WAN, PrivateLink, or VPC Lattice
 
-- no Network Access Analyzer integration yet
-- no active probes
-- no public internet exposure checks
-- no Transit Gateway, Cloud WAN, PrivateLink, or VPC Lattice specific logic
-- no broad AWS resource coverage in v1 beyond EC2 instances and ENIs
-- no web UI
-- no auto-remediation
-- no multi-cloud support
-- no multi-region execution in v1
-- no support for ambiguous selectors
-- no non-commercial AWS partition support in v1
+## Development
 
-The current repository state is still intentionally narrow. It supports config validation, discovery for EC2 instances and ENIs, and Reachability Analyzer-backed execution for `allow` and `deny` assertions. It does not attempt broader AWS target coverage or non-v1 analysis modes.
-
-## Local development
+Install development dependencies and run the local checks:
 
 ```bash
 python -m venv .venv
@@ -212,26 +213,6 @@ ruff format --check .
 mypy preflight
 pytest
 ```
-
-## Roadmap
-
-- expand the supported target catalog carefully, not indiscriminately
-
-## Design choices
-
-- AWS-first because the tool is intentionally built around AWS-native network analysis instead of trying to paper over provider-specific behavior.
-- Single-region-only in v1 because discovery and execution semantics stay much clearer when every assertion resolves inside one explicit effective region.
-- Reachability Analyzer only in v1 because one trustworthy execution engine is more credible than multiple partially-supported analysis modes.
-- ENI as the canonical execution target because it is the most precise AWS networking anchor for path analysis, while EC2 instance support keeps the CLI ergonomic.
-- Narrow by design because a public v1 should solve a small slice of AWS networking well instead of claiming broad coverage with caveats everywhere.
-
-## Project direction
-
-The core promise of this tool is simple:
-
-Declare your AWS network intent in YAML and verify that connectivity still matches it.
-
-If we keep the implementation narrow, explicit, and AWS-native, it will stay more useful than a broader but vague tool.
 
 ## License
 
