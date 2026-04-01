@@ -1,0 +1,47 @@
+version: 1
+
+defaults:
+  region: us-east-1
+  auth:
+    mode: profile
+    profile: default
+
+accounts:
+  shared:
+    role_arn: arn:aws:iam::111111111111:role/PreflightReadRole
+    regions: [us-east-1]
+
+  app:
+    role_arn: arn:aws:iam::222222222222:role/PreflightReadRole
+    regions: [us-east-1]
+
+assertions:
+  - id: dev-to-shared-dns-allow
+    type: allow
+    source:
+      account: app
+      selector:
+        tags:
+          Name: app-dev-ec2
+    destination:
+      account: shared
+      selector:
+        tags:
+          Name: shared-dns-endpoint
+    protocol: tcp
+    port: 53
+
+  - id: dev-to-prod-db-deny
+    type: deny
+    source:
+      account: app
+      selector:
+        tags:
+          Name: app-dev-ec2
+    destination:
+      account: app
+      selector:
+        tags:
+          Name: app-prod-db
+    protocol: tcp
+    port: 5432
