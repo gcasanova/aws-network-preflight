@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "aws-network-preflight"
 version = "0.1.0"
-description = "Declare your AWS network intent in YAML and verify that connectivity still matches it."
+description = "Declare allowed and denied AWS connectivity in YAML and verify it with AWS Reachability Analyzer."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -34,6 +34,7 @@ dev = [
 
 [project.scripts]
 aws-network-preflight = "preflight.cli:app"
+anp = "preflight.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/gcasanova/aws-network-preflight"

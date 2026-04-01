@@ -36,18 +36,20 @@ The CLI uses the default AWS credential chain by default, supports `--profile`, 
 
 You will need AWS credentials and permissions that can read the referenced resources and run Reachability Analyzer in the configured accounts.
 
+`anp` is the short alias for `aws-network-preflight`.
+
 ## Quick start
 
 Create a starter config:
 
 ```bash
-aws-network-preflight init
+anp init
 ```
 
 Validate the starter config to confirm the CLI is installed and working:
 
 ```bash
-aws-network-preflight validate -f preflight.yaml
+anp validate -f preflight.yaml
 ```
 
 Then edit `preflight.yaml` with your real AWS account details, role ARNs, regions, and selectors before using `list-targets` or `run`.
@@ -55,13 +57,13 @@ Then edit `preflight.yaml` with your real AWS account details, role ARNs, region
 Resolve the configured targets without running analysis:
 
 ```bash
-aws-network-preflight list-targets -f preflight.yaml
+anp list-targets -f preflight.yaml
 ```
 
 Run the assertions:
 
 ```bash
-aws-network-preflight run -f preflight.yaml
+anp run -f preflight.yaml
 ```
 
 For CI-friendly output, `run` and `explain` also support `--format json`.
@@ -124,13 +126,13 @@ Common tasks:
 
 ```bash
 # run all configured assertions
-aws-network-preflight run -f preflight.yaml
+anp run -f preflight.yaml
 
 # inspect one assertion in detail
-aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow
+anp explain -f preflight.yaml --id dev-to-shared-dns-allow
 
 # emit machine-readable output for CI
-aws-network-preflight run -f preflight.yaml --format json
+anp run -f preflight.yaml --format json
 ```
 
 Text output from `run`:
