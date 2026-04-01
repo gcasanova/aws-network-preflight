@@ -86,6 +86,7 @@ The initial release should feel credible, boring in the right ways, and narrowly
 
 8. Separate orchestration from presentation.
    The runner should produce plain result objects. Console and JSON reporters should format those results without owning business logic.
+   For now, JSON rendering exists for the internal result objects, but it is not yet exposed as a user-facing CLI option.
 
 9. Avoid a plugin architecture.
    Future engines can fit behind a small internal interface, but v1 should not introduce registries, plugin loading, or extension frameworks.
@@ -173,6 +174,7 @@ This single-region rule is an intentional v1 simplification to keep discovery an
 - `preflight/engines/reachability_analyzer.py`
   - Reachability Analyzer create/start/read/cleanup flow
   - mapping AWS results into runner-friendly outputs
+  - normalize expected AWS SDK/runtime failures into structured assertion-level errors without hiding programming defects
 
 - `preflight/reporters/console.py`
   - rich terminal output for validation, resolution, run summaries, and explain output
@@ -235,5 +237,5 @@ Phase 4 is now implemented for the narrow v1 scope. The remaining work is follow
 
 ## Open decisions to document as we build
 
-- JSON output shape for CI consumers
+- When to expose the existing JSON result model as a stable CLI contract
 - Whether future versions should expose a user-controlled cleanup retention mode for debugging

@@ -53,6 +53,7 @@ The repository now covers the intended narrow v1 flow:
 - `explain`: execute one assertion with more detailed output
 
 The execution backend for v1 is AWS Reachability Analyzer only.
+The repository also includes a JSON reporter for the current internal result objects, but JSON output is not yet exposed as a CLI flag.
 
 ## Example config
 
@@ -172,7 +173,7 @@ pytest
 
 ## Roadmap
 
-- add JSON reporting for CI pipelines
+- expose the existing JSON result model through a user-facing CLI output option
 - expand the supported target catalog carefully, not indiscriminately
 
 ## Project direction

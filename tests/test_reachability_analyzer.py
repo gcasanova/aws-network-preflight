@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from preflight.discovery import ResolvedTarget
 from preflight.engines.reachability_analyzer import (
@@ -129,7 +129,7 @@ def test_analyze_assertion_raises_when_path_creation_fails() -> None:
         create_path_error=client_error("UnauthorizedOperation", "CreateNetworkInsightsPath")
     )
 
-    with pytest.raises(ReachabilityAnalyzerError, match="Reachability Analyzer API error"):
+    with pytest.raises(ReachabilityAnalyzerError, match="Reachability Analyzer AWS SDK error"):
         analyze_assertion(
             build_assertion("allow"),
             build_target("eni-0123456789abcdef0"),
@@ -187,7 +187,7 @@ def test_analyze_assertion_attempts_cleanup_after_start_failure() -> None:
         start_analysis_error=client_error("UnauthorizedOperation", "StartNetworkInsightsAnalysis")
     )
 
-    with pytest.raises(ReachabilityAnalyzerError, match="Reachability Analyzer API error"):
+    with pytest.raises(ReachabilityAnalyzerError, match="Reachability Analyzer AWS SDK error"):
         analyze_assertion(
             build_assertion("allow"),
             build_target("eni-0123456789abcdef0"),
@@ -199,3 +199,116 @@ def test_analyze_assertion_attempts_cleanup_after_start_failure() -> None:
 
     assert client.deleted_analysis_ids == []
     assert client.deleted_path_ids == ["nip-1234567890abcdef0"]
+
+
+def test_analyze_assertion_uses_ids_for_same_account_targets() -> None:
+    client = FakeReachabilityAnalyzerClient()
+
+    analyze_assertion(
+        build_assertion("allow"),
+        build_target("eni-0123456789abcdef0", owner_id="222222222222"),
+        build_target("eni-0fedcba9876543210", owner_id="222222222222"),
+        client,
+        "222222222222",
+        poll_interval_seconds=0.0,
+    )
+
+    assert client.create_path_calls[0]["Source"] == "eni-0123456789abcdef0"
+    assert client.create_path_calls[0]["Destination"] == "eni-0fedcba9876543210"
+    assert "AdditionalAccounts" not in client.start_analysis_calls[0]
+
+
+def test_analyze_assertion_uses_arn_and_additional_account_for_cross_account_destination() -> None:
+    client = FakeReachabilityAnalyzerClient()
+
+    analyze_assertion(
+        build_assertion("allow"),
+        build_target("eni-0123456789abcdef0", owner_id="222222222222"),
+        build_target("eni-0fedcba9876543210", owner_id="111111111111"),
+        client,
+        "222222222222",
+        poll_interval_seconds=0.0,
+    )
+
+    assert client.create_path_calls[0]["Source"] == "eni-0123456789abcdef0"
+    assert client.create_path_calls[0]["Destination"] == (
+        "arn:aws:ec2:us-east-1:111111111111:network-interface/eni-0fedcba9876543210"
+    )
+    assert client.start_analysis_calls[0]["AdditionalAccounts"] == ["111111111111"]
+
+
+def test_analyze_assertion_dedupes_and_sorts_additional_accounts() -> None:
+    client = FakeReachabilityAnalyzerClient()
+
+    analyze_assertion(
+        build_assertion("allow"),
+        build_target("eni-0123456789abcdef0", owner_id="333333333333"),
+        build_target("eni-0fedcba9876543210", owner_id="111111111111"),
+        client,
+        "222222222222",
+        poll_interval_seconds=0.0,
+    )
+
+    assert client.create_path_calls[0]["Source"] == (
+        "arn:aws:ec2:us-east-1:333333333333:network-interface/eni-0123456789abcdef0"
+    )
+    assert client.create_path_calls[0]["Destination"] == (
+        "arn:aws:ec2:us-east-1:111111111111:network-interface/eni-0fedcba9876543210"
+    )
+    assert client.start_analysis_calls[0]["AdditionalAccounts"] == [
+        "111111111111",
+        "333333333333",
+    ]
+
+
+def test_analyze_assertion_dedupes_duplicate_additional_accounts() -> None:
+    client = FakeReachabilityAnalyzerClient()
+
+    analyze_assertion(
+        build_assertion("allow"),
+        build_target("eni-0123456789abcdef0", owner_id="111111111111"),
+        build_target("eni-0fedcba9876543210", owner_id="111111111111"),
+        client,
+        "222222222222",
+        poll_interval_seconds=0.0,
+    )
+
+    assert client.start_analysis_calls[0]["AdditionalAccounts"] == ["111111111111"]
+
+
+def test_analyze_assertion_normalizes_botocore_runtime_errors() -> None:
+    client = FakeReachabilityAnalyzerClient(
+        describe_analysis_error=EndpointConnectionError(endpoint_url="https://ec2.us-east-1.amazonaws.com")
+    )
+
+    with pytest.raises(ReachabilityAnalyzerError, match="Reachability Analyzer AWS SDK error"):
+        analyze_assertion(
+            build_assertion("allow"),
+            build_target("eni-0123456789abcdef0"),
+            build_target("eni-0fedcba9876543210"),
+            client,
+            "222222222222",
+            poll_interval_seconds=0.0,
+        )
+
+    assert client.deleted_analysis_ids == ["nia-1234567890abcdef0"]
+    assert client.deleted_path_ids == ["nip-1234567890abcdef0"]
+
+
+def test_analyze_assertion_records_cleanup_botocore_errors() -> None:
+    client = FakeReachabilityAnalyzerClient(
+        delete_path_error=EndpointConnectionError(endpoint_url="https://ec2.us-east-1.amazonaws.com")
+    )
+
+    result = analyze_assertion(
+        build_assertion("allow"),
+        build_target("eni-0123456789abcdef0"),
+        build_target("eni-0fedcba9876543210"),
+        client,
+        "222222222222",
+        poll_interval_seconds=0.0,
+    )
+
+    assert result.cleanup.path_delete_attempted is True
+    assert result.cleanup.path_delete_succeeded is False
+    assert result.cleanup.errors

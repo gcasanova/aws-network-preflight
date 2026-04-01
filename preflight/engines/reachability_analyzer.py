@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from preflight.discovery import ResolvedTarget
 from preflight.models import Assertion
@@ -79,7 +79,12 @@ def analyze_assertion(
     max_polls: int = 60,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> ReachabilityAnalysisResult:
-    """Run Reachability Analyzer for one assertion."""
+    """Run Reachability Analyzer for one assertion.
+
+    Normalize AWS SDK/service-call failures into ReachabilityAnalyzerError so the
+    runner can report them as assertion-level execution errors. Unexpected
+    programming mistakes should still surface normally.
+    """
 
     if source.resolved_target_type != "eni" or destination.resolved_target_type != "eni":
         raise ReachabilityAnalyzerError(
@@ -161,9 +166,9 @@ def analyze_assertion(
             explanation_summary=explanation_summary,
             cleanup=cleanup,
         )
-    except ClientError as exc:
+    except (ClientError, BotoCoreError) as exc:
         raise ReachabilityAnalyzerError(
-            f"Reachability Analyzer API error: {exc}",
+            f"Reachability Analyzer AWS SDK error: {exc}",
             cleanup=cleanup,
             path_id=path_id,
             analysis_id=analysis_id,
@@ -289,7 +294,7 @@ def _cleanup_analysis_artifacts(
         try:
             ec2_client.delete_network_insights_analysis(NetworkInsightsAnalysisId=analysis_id)
             cleanup.analysis_delete_succeeded = True
-        except ClientError as exc:
+        except (ClientError, BotoCoreError) as exc:
             cleanup.errors.append(
                 f"Failed to delete network insights analysis '{analysis_id}': {exc}"
             )
@@ -299,7 +304,7 @@ def _cleanup_analysis_artifacts(
         try:
             ec2_client.delete_network_insights_path(NetworkInsightsPathId=path_id)
             cleanup.path_delete_succeeded = True
-        except ClientError as exc:
+        except (ClientError, BotoCoreError) as exc:
             cleanup.errors.append(f"Failed to delete network insights path '{path_id}': {exc}")
 
     return cleanup

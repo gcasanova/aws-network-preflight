@@ -40,13 +40,6 @@ def print_validation_success(console: Console, path: Path, config: PreflightConf
     )
 
 
-def print_not_implemented(console: Console, command_name: str, detail: str) -> None:
-    """Render a transparent scaffold notice."""
-
-    console.print(f"[yellow]{command_name} is scaffolded but not implemented yet.[/yellow]")
-    console.print(detail)
-
-
 def print_resolved_targets(
     console: Console,
     resolved_targets: list[ResolvedAssertionTarget],
