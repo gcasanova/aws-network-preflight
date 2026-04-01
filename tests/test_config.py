@@ -80,3 +80,71 @@ assertions:
 
     with pytest.raises(PreflightConfigError, match="references unknown account 'missing'"):
         load_config(config_path)
+
+
+def test_load_config_rejects_account_with_multiple_regions(tmp_path: Path) -> None:
+    config_path = tmp_path / "preflight.yaml"
+    config_path.write_text(
+        """\
+version: 1
+defaults:
+  region: us-east-1
+accounts:
+  app:
+    regions: [us-east-1, us-west-2]
+assertions:
+  - id: single-region-only
+    type: allow
+    source:
+      account: app
+      selector:
+        resource_id: i-1234567890abcdef0
+    destination:
+      account: app
+      selector:
+        resource_id: eni-abcdef12345678900
+    protocol: tcp
+    port: 443
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PreflightConfigError, match="v1 is single-region-only"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_account_region_that_differs_from_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / "preflight.yaml"
+    config_path.write_text(
+        """\
+version: 1
+defaults:
+  region: us-east-1
+accounts:
+  app:
+    regions: [us-west-2]
+assertions:
+  - id: region-mismatch
+    type: deny
+    source:
+      account: app
+      selector:
+        resource_id: i-1234567890abcdef0
+    destination:
+      account: app
+      selector:
+        resource_id: eni-abcdef12345678900
+    protocol: tcp
+    port: 443
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PreflightConfigError, match=r"must match defaults\.region"):
+        load_config(config_path)
+
+
+def test_starter_config_matches_example_file() -> None:
+    example_path = Path("examples/basic/preflight.yaml")
+
+    assert example_path.read_text(encoding="utf-8") == STARTER_CONFIG_YAML

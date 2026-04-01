@@ -158,3 +158,27 @@ class PreflightConfig(StrictModel):
                 )
 
         return value
+
+    @model_validator(mode="after")
+    def validate_single_region_v1(self) -> PreflightConfig:
+        """Enforce the intentionally narrow single-region v1 model."""
+
+        effective_region = self.defaults.region
+
+        for account_name, account in self.accounts.items():
+            if len(account.regions) != 1:
+                raise ValueError(
+                    "v1 is single-region-only; "
+                    f"accounts.{account_name}.regions must contain exactly one region matching "
+                    f"defaults.region ({effective_region})"
+                )
+
+            account_region = account.regions[0]
+            if account_region != effective_region:
+                raise ValueError(
+                    "v1 is single-region-only; "
+                    f"accounts.{account_name}.regions[0] must match defaults.region "
+                    f"({effective_region}), got {account_region}"
+                )
+
+        return self

@@ -17,7 +17,7 @@ from preflight.reporters.console import (
     print_not_implemented,
     print_validation_success,
 )
-from preflight.runner import find_assertion
+from preflight.runner import AssertionNotFoundError, find_assertion
 
 app = typer.Typer(
     add_completion=False,
@@ -79,10 +79,9 @@ def init(
 ) -> None:
     """Create a starter config and example directory."""
 
-    created_files = [
-        _write_file(file, STARTER_CONFIG_YAML, force=force),
-        _write_file(examples_dir / "preflight.yaml", STARTER_CONFIG_YAML, force=force),
-    ]
+    target_paths = [file, examples_dir / "preflight.yaml"]
+    _validate_writable_paths(target_paths, force=force)
+    created_files = [_write_file(path, STARTER_CONFIG_YAML) for path in target_paths]
     print_created_files(console, created_files)
 
 
@@ -171,7 +170,7 @@ def explain(
 
     try:
         find_assertion(config, assertion_id)
-    except KeyError as exc:
+    except AssertionNotFoundError as exc:
         _exit_config_error(str(exc))
 
     _exit_not_implemented(
@@ -200,11 +199,19 @@ def _load_config_or_exit(path: Path) -> PreflightConfig:
         _exit_config_error(str(exc))
 
 
-def _write_file(path: Path, contents: str, force: bool) -> Path:
-    """Write a file, creating parent directories as needed."""
+def _validate_writable_paths(paths: list[Path], force: bool) -> None:
+    """Fail fast before writing if any target path would be rejected."""
 
-    if path.exists() and not force:
-        _exit_config_error(f"Refusing to overwrite existing file without --force: {path}")
+    if force:
+        return
+
+    for path in paths:
+        if path.exists():
+            _exit_config_error(f"Refusing to overwrite existing file without --force: {path}")
+
+
+def _write_file(path: Path, contents: str) -> Path:
+    """Write a file, creating parent directories as needed."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents, encoding="utf-8")

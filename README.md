@@ -24,6 +24,7 @@ The first release is intentionally narrow.
 - CLI first
 - Python 3.11+
 - YAML config
+- single-region-only for v1, using `defaults.region` as the effective region
 - Assertion types:
   - `allow`
   - `deny`
@@ -38,6 +39,8 @@ The first release is intentionally narrow.
   - Elastic Network Interfaces
 - Every selector must resolve to exactly one resource
 
+For v1, this is intentionally a single-region tool. The effective region comes from `defaults.region`, and configs that imply multi-region behavior are rejected for now. That is a scope choice for a precise first release, not a claim that multi-region support will never exist.
+
 ## Current status
 
 The repository is not at the full v1 feature set yet.
@@ -47,6 +50,8 @@ The repository is not at the full v1 feature set yet.
 - `list-targets`: CLI scaffold only, not implemented yet
 - `run`: CLI scaffold only, not implemented yet
 - `explain`: CLI scaffold only, not implemented yet
+
+No Phase 3 discovery implementation has started yet.
 
 ## Example config
 
@@ -128,6 +133,12 @@ v1 is designed to work with normal AWS credential flows.
 
 The base credentials need permission to call `sts:AssumeRole` when account roles are used. The assumed role itself will need the read and analysis permissions required by the implementation, including Reachability Analyzer APIs.
 
+## v1 target model
+
+For v1, ENI is the canonical execution target. EC2 instance is still an allowed user-facing input, but it is intended as a convenience input that will later normalize to one ENI before analysis runs.
+
+That normalization logic is not implemented yet. The point of documenting it now is to keep the eventual execution model precise and networking-oriented.
+
 ## Limitations
 
 The tool is intentionally honest about what it will not do in v1.
@@ -140,9 +151,10 @@ The tool is intentionally honest about what it will not do in v1.
 - no web UI
 - no auto-remediation
 - no multi-cloud support
+- no multi-region execution in v1
 - no support for ambiguous selectors
 
-The current repository state is earlier than the full v1 target. Today it provides the project skeleton, config validation, examples, and CI/test setup. Selector resolution is planned to start with EC2 instances and ENIs only, and Reachability Analyzer execution is still to be implemented.
+The current repository state is earlier than the full v1 target. Today it provides the project skeleton, config validation, examples, and CI/test setup. Selector resolution has not started yet, is planned to start with EC2 instances and ENIs only, and Reachability Analyzer execution is still to be implemented.
 
 ## Local development
 

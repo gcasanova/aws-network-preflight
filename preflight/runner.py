@@ -34,6 +34,10 @@ class RunSummary:
         return sum(1 for result in self.results if not result.passed)
 
 
+class AssertionNotFoundError(ValueError):
+    """Raised when a named assertion does not exist in the loaded config."""
+
+
 def find_assertion(config: PreflightConfig, assertion_id: str) -> Assertion:
     """Return one assertion by ID or raise a helpful error."""
 
@@ -41,7 +45,7 @@ def find_assertion(config: PreflightConfig, assertion_id: str) -> Assertion:
         if assertion.id == assertion_id:
             return assertion
 
-    raise KeyError(f"Assertion '{assertion_id}' was not found in the config")
+    raise AssertionNotFoundError(f"Assertion '{assertion_id}' was not found in the config")
 
 
 def run_assertions(_config: PreflightConfig, _profile_override: str | None = None) -> RunSummary:

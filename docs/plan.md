@@ -21,6 +21,8 @@ The initial release should feel credible, boring in the right ways, and narrowly
   - `resource_id`
   - `arn`
   - `tags`
+- Single effective region for v1:
+  - `defaults.region` is the only execution region
 - Supported AWS target types for v1:
   - EC2 instance IDs
   - Elastic Network Interface IDs
@@ -52,36 +54,50 @@ The initial release should feel credible, boring in the right ways, and narrowly
    - optional `--profile` override
    - per-account `role_arn` assumption
 
-3. Resolve selectors before analysis.
+3. Keep v1 single-region-only.
+   v1 should use `defaults.region` as the single effective region for validation, discovery, and execution. We should not add endpoint-level region overrides yet. The existing account region lists may remain in the schema for future evolution, but v1 should reject configs that imply multi-region behavior.
+
+4. Resolve selectors before analysis.
    `list-targets`, `run`, and `explain` should all share the same selector-resolution path. Every selector must resolve to exactly one target. Zero or multiple matches are hard failures.
 
-4. Start with a narrow resource-lookup strategy.
+5. Start with a narrow resource-lookup strategy.
    v1 will support only two concrete target types:
    - EC2 instances
    - Elastic Network Interfaces
 
    This is intentionally narrower than the selector schema alone might suggest. Those two resource types are common, easy to reason about, and map cleanly onto AWS network analysis workflows. Broader support is out of scope for v1 because many AWS resources introduce service-specific semantics, indirect network attachments, or multi-step resolution rules that would make the first release less predictable.
 
-5. Make selector resolution opinionated.
+6. Make selector resolution opinionated.
    Selector resolution should not be generic or best-effort in v1. The resolver should identify one concrete EC2 instance or one concrete ENI and fail otherwise. We should avoid claiming support for arbitrary ARNs or taggable AWS resources just because they can be described in YAML.
 
-6. Treat Reachability Analyzer as the source of truth for v1.
+7. Treat Reachability Analyzer as the source of truth for v1.
    `allow` assertions pass when the analysis result is reachable. `deny` assertions pass when the analysis result is not reachable. We should surface the AWS-native explanation rather than inventing our own network model.
 
-7. Separate orchestration from presentation.
+8. Separate orchestration from presentation.
    The runner should produce plain result objects. Console and JSON reporters should format those results without owning business logic.
 
-8. Avoid a plugin architecture.
+9. Avoid a plugin architecture.
    Future engines can fit behind a small internal interface, but v1 should not introduce registries, plugin loading, or extension frameworks.
 
 ## v1 target model
 
-The supported AWS target types for v1 are explicit:
+The supported user-facing AWS target types for v1 are explicit:
 
 - EC2 instance IDs such as `i-0123456789abcdef0`
 - Elastic Network Interface IDs such as `eni-0123456789abcdef0`
 
-The intent is to support selectors that ultimately resolve to exactly one of those target types.
+The internal execution direction for v1 is also explicit:
+
+- ENI is the canonical execution target
+- EC2 instance is a convenience input type
+
+The intended model is that an instance selector will later normalize to one specific ENI before analysis runs. That normalization logic is not implemented yet, but the execution model should already be documented this way because it is a cleaner fit for networking-oriented analysis.
+
+### Why ENI is the canonical execution target
+
+- Network policy evaluation in AWS ultimately happens at the network interface layer more than at the instance abstraction layer.
+- ENIs provide a more precise anchor for security groups, subnets, routing context, and packet-path analysis.
+- Treating instances as a convenience input keeps the CLI ergonomic without making the execution model fuzzy.
 
 ### Why broader resource support is out of scope
 
@@ -96,13 +112,17 @@ For a public v1, it is better to support a small set of targets well than to adv
 
 - Every selector must resolve to exactly one resource.
 - Resolution is account-scoped by the `account` field on each endpoint.
-- Resolution is region-scoped. In v1, the resolver should only consider regions explicitly configured for the target account.
+- v1 is intentionally single-region-only. `defaults.region` is the one effective region for the whole run.
+- `accounts.*.regions` may remain in the config shape for now, but in v1 each account must declare exactly one region and it must match `defaults.region`.
+- No endpoint-level `region` field is supported in v1.
 - `resource_id` is valid only when it names a supported v1 target type.
 - `arn` is valid only when it refers to a supported v1 target type and can be mapped unambiguously to one region/account/resource.
 - `tags` are valid only when they resolve to exactly one supported v1 target type within the configured account and region scope.
 - If a selector matches zero resources, the assertion should fail clearly as a config/runtime error.
 - If a selector matches multiple resources, the assertion should fail clearly rather than picking one.
 - We should not silently translate unsupported resources to some underlying network object in v1.
+
+This single-region rule is an intentional v1 simplification to keep discovery and execution semantics precise. It is not meant as a permanent product limitation.
 
 ## Module breakdown
 
@@ -170,6 +190,8 @@ For a public v1, it is better to support a small set of targets well than to adv
 ### Phase 3
 
 - implement selector resolution for `resource_id`, `arn`, and `tags`
+- treat ENIs as the canonical execution target
+- normalize EC2 instance inputs to one ENI before execution
 - constrain resolution to EC2 instances and ENIs only
 - add `list-targets`
 - make `validate` production-ready
