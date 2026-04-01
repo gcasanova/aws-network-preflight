@@ -16,12 +16,13 @@ from preflight.exit_codes import ExitCode
 from preflight.models import PreflightConfig
 from preflight.reporters.console import (
     build_console,
+    print_assertion_explanation,
     print_created_files,
-    print_not_implemented,
     print_resolved_targets,
+    print_run_summary,
     print_validation_success,
 )
-from preflight.runner import AssertionNotFoundError, find_assertion
+from preflight.runner import AssertionNotFoundError, run_assertion, run_assertions
 
 app = typer.Typer(
     add_completion=False,
@@ -150,12 +151,20 @@ def run(
 ) -> None:
     """Run all assertions and fail if any assertion fails."""
 
-    _load_config_or_exit(file)
-    _ = _cli_context(ctx)
-    _exit_not_implemented(
-        "run",
-        "Reachability Analyzer execution is planned for the next phase.",
-    )
+    config = _load_config_or_exit(file)
+    cli_context = _cli_context(ctx)
+
+    try:
+        summary = run_assertions(config, profile_override=cli_context.profile_override)
+    except (SelectorResolutionError, AccountIdentityError, BotoCoreError, ClientError) as exc:
+        _exit_runtime_error(str(exc))
+
+    print_run_summary(console, summary)
+
+    if summary.error_count:
+        raise typer.Exit(code=int(ExitCode.RUNTIME_ERROR))
+    if summary.failed_count:
+        raise typer.Exit(code=int(ExitCode.ASSERTION_FAILED))
 
 
 @app.command()
@@ -178,17 +187,21 @@ def explain(
     """Explain one assertion in detail."""
 
     config = _load_config_or_exit(file)
-    _ = _cli_context(ctx)
+    cli_context = _cli_context(ctx)
 
     try:
-        find_assertion(config, assertion_id)
+        result = run_assertion(config, assertion_id, profile_override=cli_context.profile_override)
     except AssertionNotFoundError as exc:
         _exit_config_error(str(exc))
+    except (SelectorResolutionError, AccountIdentityError, BotoCoreError, ClientError) as exc:
+        _exit_runtime_error(str(exc))
 
-    _exit_not_implemented(
-        "explain",
-        "Detailed Reachability Analyzer-backed explain output is planned for the next phase.",
-    )
+    print_assertion_explanation(console, result)
+
+    if result.status == "error":
+        raise typer.Exit(code=int(ExitCode.RUNTIME_ERROR))
+    if result.status == "failed":
+        raise typer.Exit(code=int(ExitCode.ASSERTION_FAILED))
 
 
 def _cli_context(ctx: typer.Context) -> CLIContext:
@@ -248,13 +261,6 @@ def _exit_config_error(message: str) -> NoReturn:
 
     console.print(f"[red]Config error:[/red] {message}")
     raise typer.Exit(code=int(ExitCode.CONFIG_ERROR))
-
-
-def _exit_not_implemented(command_name: str, detail: str) -> NoReturn:
-    """Exit with a runtime code for scaffolded commands."""
-
-    print_not_implemented(console, command_name, detail)
-    raise typer.Exit(code=int(ExitCode.RUNTIME_ERROR))
 
 
 def _exit_runtime_error(message: str) -> NoReturn:

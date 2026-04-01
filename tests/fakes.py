@@ -124,6 +124,102 @@ class FakeSTSClient:
         return {"Account": self.account_id}
 
 
+class FakeReachabilityAnalyzerClient:
+    def __init__(
+        self,
+        *,
+        create_path_response: dict[str, Any] | None = None,
+        start_analysis_response: dict[str, Any] | None = None,
+        analysis_sequence: list[dict[str, Any]] | None = None,
+        create_path_error: Exception | None = None,
+        start_analysis_error: Exception | None = None,
+        describe_analysis_error: Exception | None = None,
+        delete_analysis_error: Exception | None = None,
+        delete_path_error: Exception | None = None,
+    ) -> None:
+        self.create_path_response = create_path_response or {
+            "NetworkInsightsPath": {
+                "NetworkInsightsPathId": "nip-1234567890abcdef0",
+                "NetworkInsightsPathArn": (
+                    "arn:aws:ec2:us-east-1:222222222222:network-insights-path/nip-1234567890abcdef0"
+                ),
+            }
+        }
+        self.start_analysis_response = start_analysis_response or {
+            "NetworkInsightsAnalysis": {
+                "NetworkInsightsAnalysisId": "nia-1234567890abcdef0",
+                "NetworkInsightsAnalysisArn": (
+                    "arn:aws:ec2:us-east-1:222222222222:"
+                    "network-insights-analysis/nia-1234567890abcdef0"
+                ),
+                "Status": "running",
+            }
+        }
+        self.analysis_sequence = analysis_sequence or [
+            {
+                "NetworkInsightsAnalysisId": "nia-1234567890abcdef0",
+                "NetworkInsightsAnalysisArn": (
+                    "arn:aws:ec2:us-east-1:222222222222:"
+                    "network-insights-analysis/nia-1234567890abcdef0"
+                ),
+                "Status": "succeeded",
+                "NetworkPathFound": True,
+            }
+        ]
+        self.create_path_error = create_path_error
+        self.start_analysis_error = start_analysis_error
+        self.describe_analysis_error = describe_analysis_error
+        self.delete_analysis_error = delete_analysis_error
+        self.delete_path_error = delete_path_error
+        self.create_path_calls: list[dict[str, Any]] = []
+        self.start_analysis_calls: list[dict[str, Any]] = []
+        self.describe_analysis_calls: list[dict[str, Any]] = []
+        self.deleted_analysis_ids: list[str] = []
+        self.deleted_path_ids: list[str] = []
+
+    def create_network_insights_path(self, **kwargs: Any) -> dict[str, Any]:
+        self.create_path_calls.append(kwargs)
+        if self.create_path_error is not None:
+            raise self.create_path_error
+        return self.create_path_response
+
+    def start_network_insights_analysis(self, **kwargs: Any) -> dict[str, Any]:
+        self.start_analysis_calls.append(kwargs)
+        if self.start_analysis_error is not None:
+            raise self.start_analysis_error
+        return self.start_analysis_response
+
+    def describe_network_insights_analyses(self, **kwargs: Any) -> dict[str, Any]:
+        self.describe_analysis_calls.append(kwargs)
+        if self.describe_analysis_error is not None:
+            raise self.describe_analysis_error
+
+        if self.analysis_sequence:
+            current = self.analysis_sequence.pop(0)
+        else:
+            current = {
+                "NetworkInsightsAnalysisId": "nia-1234567890abcdef0",
+                "Status": "succeeded",
+                "NetworkPathFound": True,
+            }
+
+        return {"NetworkInsightsAnalyses": [current]}
+
+    def delete_network_insights_analysis(self, **kwargs: Any) -> dict[str, Any]:
+        analysis_id = kwargs["NetworkInsightsAnalysisId"]
+        self.deleted_analysis_ids.append(analysis_id)
+        if self.delete_analysis_error is not None:
+            raise self.delete_analysis_error
+        return {"NetworkInsightsAnalysisId": analysis_id}
+
+    def delete_network_insights_path(self, **kwargs: Any) -> dict[str, Any]:
+        path_id = kwargs["NetworkInsightsPathId"]
+        self.deleted_path_ids.append(path_id)
+        if self.delete_path_error is not None:
+            raise self.delete_path_error
+        return {"NetworkInsightsPathId": path_id}
+
+
 class FakePaginator:
     def __init__(self, pages: list[dict[str, Any]]) -> None:
         self._pages = pages

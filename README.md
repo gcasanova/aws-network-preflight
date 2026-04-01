@@ -4,7 +4,7 @@ Declare your AWS network intent in YAML and verify that connectivity still match
 
 `aws-network-preflight` is an AWS-first CLI for platform, SRE, and networking teams. You describe the paths that must be reachable or must not be reachable, and the tool verifies those expectations using AWS-native analysis.
 
-This repository is being built in phases. Today, `init`, `validate`, and `list-targets` are implemented. `run` and `explain` still exist as honest CLI scaffolds and do not execute Reachability Analyzer flows yet.
+This repository is being built in phases. Today, `init`, `validate`, `list-targets`, `run`, and `explain` are implemented for the narrow v1 scope described below.
 
 ## Why this exists
 
@@ -44,15 +44,15 @@ For v1, discovery is also intentionally limited to the standard commercial AWS p
 
 ## Current status
 
-The repository is not at the full v1 feature set yet.
+The repository now covers the intended narrow v1 flow:
 
-- `init`: available now
-- `validate`: available now
-- `list-targets`: available now for selector resolution only
-- `run`: CLI scaffold only, not implemented yet
-- `explain`: CLI scaffold only, not implemented yet
+- `init`: create a starter config and examples
+- `validate`: validate YAML structure and schema
+- `list-targets`: resolve selectors to canonical execution targets
+- `run`: execute all assertions through Reachability Analyzer
+- `explain`: execute one assertion with more detailed output
 
-Phase 3 discovery is implemented. Phase 4 execution is not.
+The execution backend for v1 is AWS Reachability Analyzer only.
 
 ## Example config
 
@@ -112,7 +112,6 @@ assertions:
 aws-network-preflight init
 aws-network-preflight validate -f preflight.yaml
 aws-network-preflight list-targets -f preflight.yaml
-# scaffolded, not implemented yet:
 aws-network-preflight run -f preflight.yaml
 aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow
 ```
@@ -136,9 +135,9 @@ The base credentials need permission to call `sts:AssumeRole` when account roles
 
 ## v1 target model
 
-For v1, ENI is the canonical execution target. EC2 instance is still an allowed user-facing input, but it is intended as a convenience input that will later normalize to one ENI before analysis runs.
+For v1, ENI is the canonical execution target. EC2 instance is still an allowed user-facing input, but it is treated as a convenience input that normalizes to one primary ENI before Reachability Analyzer execution runs.
 
-For `list-targets`, instance resolution already normalizes to the primary ENI so the resolved target model stays precise and networking-oriented. Reachability Analyzer execution is still not implemented.
+`list-targets`, `run`, and `explain` all consume the same resolved target model so selector behavior stays consistent across discovery and execution.
 For tag-based selectors, v1 enforces strict uniqueness before normalization. If an EC2 instance and an ENI both match the same tags, that is treated as ambiguous even if the instance would normalize to that same ENI.
 
 ## Limitations
@@ -157,7 +156,7 @@ The tool is intentionally honest about what it will not do in v1.
 - no support for ambiguous selectors
 - no non-commercial AWS partition support in v1
 
-The current repository state is earlier than the full v1 target. Today it provides the project skeleton, config validation, examples, CI/test setup, and selector resolution for EC2 instances and ENIs via `list-targets`. Reachability Analyzer execution is still to be implemented.
+The current repository state is still intentionally narrow. It supports config validation, discovery for EC2 instances and ENIs, and Reachability Analyzer-backed execution for `allow` and `deny` assertions. It does not attempt broader AWS target coverage or non-v1 analysis modes.
 
 ## Local development
 
@@ -173,9 +172,6 @@ pytest
 
 ## Roadmap
 
-- wire the existing target resolution flow into execution
-- implement Reachability Analyzer-backed `run`
-- implement detailed `explain`
 - add JSON reporting for CI pipelines
 - expand the supported target catalog carefully, not indiscriminately
 

@@ -13,7 +13,7 @@ The initial release should feel credible, boring in the right ways, and narrowly
 - supported discovery inputs are `resource_id`, `arn`, and `tags`
 - supported discovery target families are EC2 instances and ENIs
 - EC2 instances normalize to their primary ENI in the resolved target model
-- Reachability Analyzer execution is not implemented yet
+- Reachability Analyzer execution is implemented for `run` and `explain`
 
 ## v1 scope
 
@@ -102,7 +102,7 @@ The internal execution direction for v1 is also explicit:
 - ENI is the canonical execution target
 - EC2 instance is a convenience input type
 
-The implemented discovery model already normalizes an instance selector to one specific primary ENI in the resolved target output used by `list-targets`. Reachability Analyzer execution is still deferred to Phase 4, but the internal target model is already aligned to ENI-first execution.
+The implemented discovery model already normalizes an instance selector to one specific primary ENI in the resolved target output used by `list-targets`, `run`, and `explain`. The internal target model is now aligned to ENI-first Reachability Analyzer execution.
 
 ### Why ENI is the canonical execution target
 
@@ -221,6 +221,8 @@ Phase 3 is now focused on discovery only. `list-targets` is the implemented entr
 - add console and JSON reporting
 - harden runtime and AWS error handling
 
+Phase 4 is now implemented for the narrow v1 scope. The remaining work is follow-on hardening and future-scope decisions, not placeholder execution wiring.
+
 ## Explicit non-goals
 
 - Modeling all AWS networking concepts in-house
@@ -234,4 +236,4 @@ Phase 3 is now focused on discovery only. `list-targets` is the implemented entr
 ## Open decisions to document as we build
 
 - JSON output shape for CI consumers
-- How aggressively to clean up Reachability Analyzer paths and analyses after execution
+- Whether future versions should expose a user-controlled cleanup retention mode for debugging
