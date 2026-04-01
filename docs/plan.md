@@ -6,6 +6,15 @@
 
 The initial release should feel credible, boring in the right ways, and narrowly scoped. The goal is a polished v1, not a framework.
 
+## Current status
+
+- config validation is implemented
+- selector resolution is implemented for `list-targets`
+- supported discovery inputs are `resource_id`, `arn`, and `tags`
+- supported discovery target families are EC2 instances and ENIs
+- EC2 instances normalize to their primary ENI in the resolved target model
+- Reachability Analyzer execution is not implemented yet
+
 ## v1 scope
 
 ### Included
@@ -91,7 +100,7 @@ The internal execution direction for v1 is also explicit:
 - ENI is the canonical execution target
 - EC2 instance is a convenience input type
 
-The intended model is that an instance selector will later normalize to one specific ENI before analysis runs. That normalization logic is not implemented yet, but the execution model should already be documented this way because it is a cleaner fit for networking-oriented analysis.
+The implemented discovery model already normalizes an instance selector to one specific primary ENI in the resolved target output used by `list-targets`. Reachability Analyzer execution is still deferred to Phase 4, but the internal target model is already aligned to ENI-first execution.
 
 ### Why ENI is the canonical execution target
 
@@ -195,6 +204,8 @@ This single-region rule is an intentional v1 simplification to keep discovery an
 - constrain resolution to EC2 instances and ENIs only
 - add `list-targets`
 - make `validate` production-ready
+
+Phase 3 is now focused on discovery only. `list-targets` is the implemented entrypoint for that behavior. `run` and `explain` remain intentionally unimplemented for execution.
 
 ### Phase 4
 

@@ -7,14 +7,18 @@ from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
+from botocore.exceptions import BotoCoreError, ClientError
 
+from preflight.auth import SessionFactory
 from preflight.config import STARTER_CONFIG_YAML, PreflightConfigError, load_config
+from preflight.discovery import SelectorResolutionError, resolve_assertion_targets
 from preflight.exit_codes import ExitCode
 from preflight.models import PreflightConfig
 from preflight.reporters.console import (
     build_console,
     print_created_files,
     print_not_implemented,
+    print_resolved_targets,
     print_validation_success,
 )
 from preflight.runner import AssertionNotFoundError, find_assertion
@@ -116,12 +120,20 @@ def list_targets(
 ) -> None:
     """Resolve selectors without running assertions."""
 
-    _load_config_or_exit(file)
-    _ = _cli_context(ctx)
-    _exit_not_implemented(
-        "list-targets",
-        "Selector resolution is planned for the next phase.",
+    config = _load_config_or_exit(file)
+    cli_context = _cli_context(ctx)
+    session_factory = SessionFactory(
+        config.defaults,
+        config.accounts,
+        profile_override=cli_context.profile_override,
     )
+
+    try:
+        resolved_targets = resolve_assertion_targets(config, session_factory=session_factory)
+    except (SelectorResolutionError, BotoCoreError, ClientError) as exc:
+        _exit_runtime_error(str(exc))
+
+    print_resolved_targets(console, resolved_targets)
 
 
 @app.command()
@@ -229,6 +241,13 @@ def _exit_not_implemented(command_name: str, detail: str) -> NoReturn:
     """Exit with a runtime code for scaffolded commands."""
 
     print_not_implemented(console, command_name, detail)
+    raise typer.Exit(code=int(ExitCode.RUNTIME_ERROR))
+
+
+def _exit_runtime_error(message: str) -> NoReturn:
+    """Exit with a formatted runtime error."""
+
+    console.print(f"[red]Runtime error:[/red] {message}")
     raise typer.Exit(code=int(ExitCode.RUNTIME_ERROR))
 
 

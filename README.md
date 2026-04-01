@@ -4,7 +4,7 @@ Declare your AWS network intent in YAML and verify that connectivity still match
 
 `aws-network-preflight` is an AWS-first CLI for platform, SRE, and networking teams. You describe the paths that must be reachable or must not be reachable, and the tool verifies those expectations using AWS-native analysis.
 
-This repository is being built in phases. Today, `init` and `validate` are implemented. `list-targets`, `run`, and `explain` exist as honest CLI scaffolds, but they do not execute AWS resolution or Reachability Analyzer flows yet.
+This repository is being built in phases. Today, `init`, `validate`, and `list-targets` are implemented. `run` and `explain` still exist as honest CLI scaffolds and do not execute Reachability Analyzer flows yet.
 
 ## Why this exists
 
@@ -47,11 +47,11 @@ The repository is not at the full v1 feature set yet.
 
 - `init`: available now
 - `validate`: available now
-- `list-targets`: CLI scaffold only, not implemented yet
+- `list-targets`: available now for selector resolution only
 - `run`: CLI scaffold only, not implemented yet
 - `explain`: CLI scaffold only, not implemented yet
 
-No Phase 3 discovery implementation has started yet.
+Phase 3 discovery is implemented. Phase 4 execution is not.
 
 ## Example config
 
@@ -110,8 +110,8 @@ assertions:
 ```bash
 aws-network-preflight init
 aws-network-preflight validate -f preflight.yaml
-# scaffolded, not implemented yet:
 aws-network-preflight list-targets -f preflight.yaml
+# scaffolded, not implemented yet:
 aws-network-preflight run -f preflight.yaml
 aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow
 ```
@@ -137,7 +137,7 @@ The base credentials need permission to call `sts:AssumeRole` when account roles
 
 For v1, ENI is the canonical execution target. EC2 instance is still an allowed user-facing input, but it is intended as a convenience input that will later normalize to one ENI before analysis runs.
 
-That normalization logic is not implemented yet. The point of documenting it now is to keep the eventual execution model precise and networking-oriented.
+For `list-targets`, instance resolution already normalizes to the primary ENI so the resolved target model stays precise and networking-oriented. Reachability Analyzer execution is still not implemented.
 
 ## Limitations
 
@@ -154,7 +154,7 @@ The tool is intentionally honest about what it will not do in v1.
 - no multi-region execution in v1
 - no support for ambiguous selectors
 
-The current repository state is earlier than the full v1 target. Today it provides the project skeleton, config validation, examples, and CI/test setup. Selector resolution has not started yet, is planned to start with EC2 instances and ENIs only, and Reachability Analyzer execution is still to be implemented.
+The current repository state is earlier than the full v1 target. Today it provides the project skeleton, config validation, examples, CI/test setup, and selector resolution for EC2 instances and ENIs via `list-targets`. Reachability Analyzer execution is still to be implemented.
 
 ## Local development
 
@@ -170,8 +170,7 @@ pytest
 
 ## Roadmap
 
-- finish target resolution for `resource_id`, `arn`, and `tags`
-- implement `list-targets`
+- wire the existing target resolution flow into execution
 - implement Reachability Analyzer-backed `run`
 - implement detailed `explain`
 - add JSON reporting for CI pipelines
