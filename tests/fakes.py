@@ -44,7 +44,7 @@ class FakeEC2Client:
     def __init__(
         self,
         *,
-        account_id: str = "222222222222",
+        account_id: str | None = "222222222222",
         enis_by_id: dict[str, dict[str, Any]] | None = None,
         instances_by_id: dict[str, dict[str, Any]] | None = None,
         tag_enis: list[dict[str, Any]] | None = None,

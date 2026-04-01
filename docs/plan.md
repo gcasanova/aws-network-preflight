@@ -130,6 +130,7 @@ For a public v1, it is better to support a small set of targets well than to adv
 - `resource_id` is valid only when it names a supported v1 target type.
   We use a deliberately simple AWS-realistic pattern for EC2 instance and ENI IDs: 8 or 17 lowercase hex characters after the prefix.
 - `arn` is valid only when it refers to a supported v1 target type and can be mapped unambiguously to one region/account/resource.
+  Direct callers that bypass the normal account-aware resolution flow must provide reliable effective account identity for ARN validation.
 - `tags` are valid only when they resolve to exactly one supported v1 target type within the configured account and region scope.
 - Tag ambiguity is enforced before normalization. If an instance and an ENI both match the same tags, v1 treats that as ambiguous even if the instance would normalize to that ENI.
 - If a selector matches zero resources, the assertion should fail clearly as a config/runtime error.

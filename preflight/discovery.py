@@ -92,16 +92,21 @@ def resolve_assertion_targets(
             if account not in client_cache:
                 session = session_factory.session_for_account(account, region=effective_region)
                 client_cache[account] = session.client("ec2")
-                account_id_cache[account] = session_factory.account_id_for_account(
-                    account,
-                    region=effective_region,
-                )
+
+            effective_account_id: str | None = None
+            if endpoint.selector.arn is not None:
+                if account not in account_id_cache:
+                    account_id_cache[account] = session_factory.account_id_for_account(
+                        account,
+                        region=effective_region,
+                    )
+                effective_account_id = account_id_cache[account]
 
             target = resolve_target(
                 config,
                 endpoint,
                 ec2_client=client_cache[account],
-                effective_account_id=account_id_cache[account],
+                effective_account_id=effective_account_id,
             )
             resolved_targets.append(
                 ResolvedAssertionTarget(
@@ -212,9 +217,6 @@ def resolve_by_arn(
     """Resolve a supported EC2 ARN."""
 
     parsed_arn = _parse_ec2_arn(arn)
-    expected_account_id = effective_account_id
-    if expected_account_id is None:
-        expected_account_id = _configured_account_id(ec2_client)
 
     if parsed_arn["partition"] != AWS_PARTITION:
         raise SelectorResolutionError(
@@ -226,6 +228,16 @@ def resolve_by_arn(
         raise SelectorResolutionError(
             f"ARN '{arn}' is in region {parsed_arn['region']}, but v1 only supports "
             f"the effective region {region}."
+        )
+
+    expected_account_id = effective_account_id
+    if expected_account_id is None:
+        expected_account_id = _configured_account_id(ec2_client)
+    if expected_account_id is None:
+        raise SelectorResolutionError(
+            "ARN-based resolution requires a reliable effective AWS account ID. "
+            "Use the normal account-aware CLI/config flow or pass effective_account_id "
+            "when calling resolve_target() directly."
         )
 
     if expected_account_id is not None and parsed_arn["account_id"] != expected_account_id:
@@ -335,15 +347,12 @@ def _resolve_eni(
         interface.get("OwnerId"),
         f"ENI '{eni_id}' did not include OwnerId in the EC2 response.",
     )
-    arn = _require_str(
-        interface.get("NetworkInterfaceArn")
-        or _build_ec2_arn(
-            region=region,
-            account_id=owner_id,
-            resource_type="network-interface",
-            resource_id=eni_id,
-        ),
-        f"ENI '{eni_id}' could not be mapped to an ARN.",
+    arn = _resolve_eni_arn(
+        interface=interface,
+        region=region,
+        account_id=owner_id,
+        eni_id=eni_id,
+        error_context=f"ENI '{eni_id}' could not be mapped to an ARN.",
     )
 
     return DiscoveredTarget(
@@ -447,11 +456,12 @@ def _discover_enis_by_tags(
                 interface.get("OwnerId"),
                 f"Matched ENI '{eni_id}' is missing OwnerId.",
             )
-            arn = interface.get("NetworkInterfaceArn") or _build_ec2_arn(
+            arn = _resolve_eni_arn(
+                interface=interface,
                 region=region,
                 account_id=owner_id,
-                resource_type="network-interface",
-                resource_id=eni_id,
+                eni_id=eni_id,
+                error_context=f"Matched ENI '{eni_id}' could not be mapped to an ARN.",
             )
             matches.append(
                 DiscoveredTarget(
@@ -615,6 +625,27 @@ def _configured_account_id(ec2_client: Any) -> str | None:
     return None
 
 
+def _resolve_eni_arn(
+    interface: dict[str, Any],
+    region: str,
+    account_id: str,
+    eni_id: str,
+    error_context: str,
+) -> str:
+    """Return a canonical ENI ARN from response data or a local fallback."""
+
+    raw_arn = interface.get("NetworkInterfaceArn")
+    if raw_arn is None:
+        return _build_ec2_arn(
+            region=region,
+            account_id=account_id,
+            resource_type="network-interface",
+            resource_id=eni_id,
+        )
+
+    return _require_str(raw_arn, error_context)
+
+
 def _flatten_instances(response: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Flatten EC2 reservations into owner-aware instance tuples."""
 
@@ -656,24 +687,38 @@ def _extract_primary_eni(instance: dict[str, Any], instance_id: str) -> dict[str
             f"EC2 instance '{instance_id}' did not include any network interfaces."
         )
 
-    primary_interfaces = [
-        interface
-        for interface in raw_interfaces
-        if isinstance(interface, dict) and interface.get("Attachment", {}).get("DeviceIndex") == 0
-    ]
+    primary_interfaces: list[dict[str, Any]] = []
+    for interface in raw_interfaces:
+        if not isinstance(interface, dict):
+            raise SelectorResolutionError(
+                f"EC2 instance '{instance_id}' returned an invalid network interface shape."
+            )
+
+        attachment = interface.get("Attachment")
+        if attachment is not None and not isinstance(attachment, dict):
+            raise SelectorResolutionError(
+                f"EC2 instance '{instance_id}' returned an invalid Attachment shape "
+                "for a network interface."
+            )
+
+        device_index = None
+        if attachment is not None:
+            device_index = attachment.get("DeviceIndex")
+            if device_index is not None and not isinstance(device_index, int):
+                raise SelectorResolutionError(
+                    f"EC2 instance '{instance_id}' returned an invalid DeviceIndex value "
+                    "for a network interface attachment."
+                )
+
+        if device_index == 0:
+            primary_interfaces.append(interface)
 
     if len(primary_interfaces) != 1:
         raise SelectorResolutionError(
             f"EC2 instance '{instance_id}' did not resolve to exactly one primary ENI."
         )
 
-    primary_interface = primary_interfaces[0]
-    if not isinstance(primary_interface, dict):
-        raise SelectorResolutionError(
-            f"EC2 instance '{instance_id}' returned an invalid network interface shape."
-        )
-
-    return primary_interface
+    return primary_interfaces[0]
 
 
 def _tag_filters(tags: dict[str, str]) -> list[dict[str, Any]]:
