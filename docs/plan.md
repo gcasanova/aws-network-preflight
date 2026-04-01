@@ -32,6 +32,8 @@ The initial release should feel credible, boring in the right ways, and narrowly
   - `tags`
 - Single effective region for v1:
   - `defaults.region` is the only execution region
+- Single AWS partition for v1:
+  - standard commercial `aws` only
 - Supported AWS target types for v1:
   - EC2 instance IDs
   - Elastic Network Interface IDs
@@ -122,11 +124,14 @@ For a public v1, it is better to support a small set of targets well than to adv
 - Every selector must resolve to exactly one resource.
 - Resolution is account-scoped by the `account` field on each endpoint.
 - v1 is intentionally single-region-only. `defaults.region` is the one effective region for the whole run.
+- v1 is intentionally scoped to the standard commercial AWS partition (`aws`) only.
 - `accounts.*.regions` may remain in the config shape for now, but in v1 each account must declare exactly one region and it must match `defaults.region`.
 - No endpoint-level `region` field is supported in v1.
 - `resource_id` is valid only when it names a supported v1 target type.
+  We use a deliberately simple AWS-realistic pattern for EC2 instance and ENI IDs: 8 or 17 lowercase hex characters after the prefix.
 - `arn` is valid only when it refers to a supported v1 target type and can be mapped unambiguously to one region/account/resource.
 - `tags` are valid only when they resolve to exactly one supported v1 target type within the configured account and region scope.
+- Tag ambiguity is enforced before normalization. If an instance and an ENI both match the same tags, v1 treats that as ambiguous even if the instance would normalize to that ENI.
 - If a selector matches zero resources, the assertion should fail clearly as a config/runtime error.
 - If a selector matches multiple resources, the assertion should fail clearly rather than picking one.
 - We should not silently translate unsupported resources to some underlying network object in v1.

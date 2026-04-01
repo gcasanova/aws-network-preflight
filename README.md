@@ -34,12 +34,13 @@ The first release is intentionally narrow.
   - `resource_id`
   - `arn`
   - `tags`
-- Target types planned for v1:
+- Discovery target types supported in v1:
   - EC2 instances
   - Elastic Network Interfaces
 - Every selector must resolve to exactly one resource
 
 For v1, this is intentionally a single-region tool. The effective region comes from `defaults.region`, and configs that imply multi-region behavior are rejected for now. That is a scope choice for a precise first release, not a claim that multi-region support will never exist.
+For v1, discovery is also intentionally limited to the standard commercial AWS partition (`aws`).
 
 ## Current status
 
@@ -138,6 +139,7 @@ The base credentials need permission to call `sts:AssumeRole` when account roles
 For v1, ENI is the canonical execution target. EC2 instance is still an allowed user-facing input, but it is intended as a convenience input that will later normalize to one ENI before analysis runs.
 
 For `list-targets`, instance resolution already normalizes to the primary ENI so the resolved target model stays precise and networking-oriented. Reachability Analyzer execution is still not implemented.
+For tag-based selectors, v1 enforces strict uniqueness before normalization. If an EC2 instance and an ENI both match the same tags, that is treated as ambiguous even if the instance would normalize to that same ENI.
 
 ## Limitations
 
@@ -153,6 +155,7 @@ The tool is intentionally honest about what it will not do in v1.
 - no multi-cloud support
 - no multi-region execution in v1
 - no support for ambiguous selectors
+- no non-commercial AWS partition support in v1
 
 The current repository state is earlier than the full v1 target. Today it provides the project skeleton, config validation, examples, CI/test setup, and selector resolution for EC2 instances and ENIs via `list-targets`. Reachability Analyzer execution is still to be implemented.
 

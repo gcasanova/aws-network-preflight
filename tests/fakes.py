@@ -44,15 +44,28 @@ class FakeEC2Client:
     def __init__(
         self,
         *,
+        account_id: str = "222222222222",
         enis_by_id: dict[str, dict[str, Any]] | None = None,
         instances_by_id: dict[str, dict[str, Any]] | None = None,
         tag_enis: list[dict[str, Any]] | None = None,
         tag_instances: list[dict[str, Any]] | None = None,
+        tag_eni_pages: list[list[dict[str, Any]]] | None = None,
+        tag_instance_pages: list[list[dict[str, Any]]] | None = None,
     ) -> None:
+        self.account_id = account_id
         self.enis_by_id = enis_by_id or {}
         self.instances_by_id = instances_by_id or {}
         self.tag_enis = tag_enis or []
         self.tag_instances = tag_instances or []
+        self.tag_eni_pages = tag_eni_pages
+        self.tag_instance_pages = tag_instance_pages
+
+    def get_paginator(self, operation_name: str) -> FakePaginator:
+        if operation_name == "describe_network_interfaces":
+            return FakePaginator.network_interfaces(self.tag_eni_pages or [self.tag_enis])
+        if operation_name == "describe_instances":
+            return FakePaginator.instances(self.tag_instance_pages or [self.tag_instances])
+        raise AssertionError(f"Unexpected paginator request: {operation_name}")
 
     def describe_network_interfaces(self, **kwargs: Any) -> dict[str, Any]:
         if "NetworkInterfaceIds" in kwargs:
@@ -89,6 +102,23 @@ class FakeEC2Client:
             return {"Reservations": [reservation]}
 
         return {"Reservations": list(self.tag_instances)}
+
+
+class FakePaginator:
+    def __init__(self, pages: list[dict[str, Any]]) -> None:
+        self._pages = pages
+
+    @classmethod
+    def network_interfaces(cls, pages: list[list[dict[str, Any]]]) -> FakePaginator:
+        return cls([{"NetworkInterfaces": page} for page in pages])
+
+    @classmethod
+    def instances(cls, pages: list[list[dict[str, Any]]]) -> FakePaginator:
+        return cls([{"Reservations": page} for page in pages])
+
+    def paginate(self, **kwargs: Any) -> list[dict[str, Any]]:
+        _ = kwargs
+        return list(self._pages)
 
 
 class FakeSession:

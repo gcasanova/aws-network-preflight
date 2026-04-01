@@ -14,11 +14,12 @@ from preflight.models import Endpoint, PreflightConfig, Selector
 TargetType = Literal["eni", "ec2_instance"]
 SelectorType = Literal["resource_id", "arn", "tags"]
 EndpointRole = Literal["source", "destination"]
+AWS_PARTITION = "aws"
 
-INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]+$")
-ENI_ID_PATTERN = re.compile(r"^eni-[0-9a-f]+$")
+INSTANCE_ID_PATTERN = re.compile(r"^i-(?:[0-9a-f]{8}|[0-9a-f]{17})$")
+ENI_ID_PATTERN = re.compile(r"^eni-(?:[0-9a-f]{8}|[0-9a-f]{17})$")
 EC2_ARN_PATTERN = re.compile(
-    r"^arn:(?P<partition>aws[a-zA-Z-]*)?:ec2:(?P<region>[^:]+):(?P<account_id>\d{12}):"
+    r"^arn:(?P<partition>[^:]+):ec2:(?P<region>[^:]+):(?P<account_id>\d{12}):"
     r"(?P<resource_type>[^/]+)/(?P<resource_id>.+)$"
 )
 
@@ -201,11 +202,24 @@ def resolve_by_arn(
     """Resolve a supported EC2 ARN."""
 
     parsed_arn = _parse_ec2_arn(arn)
+    expected_account_id = _configured_account_id(ec2_client)
+
+    if parsed_arn["partition"] != AWS_PARTITION:
+        raise SelectorResolutionError(
+            f"ARN '{arn}' uses partition '{parsed_arn['partition']}', but v1 only supports "
+            f"the standard commercial AWS partition '{AWS_PARTITION}'."
+        )
 
     if parsed_arn["region"] != region:
         raise SelectorResolutionError(
             f"ARN '{arn}' is in region {parsed_arn['region']}, but v1 only supports "
             f"the effective region {region}."
+        )
+
+    if expected_account_id is not None and parsed_arn["account_id"] != expected_account_id:
+        raise SelectorResolutionError(
+            f"ARN '{arn}' is for account {parsed_arn['account_id']}, but endpoint account "
+            f"'{account}' resolves in account {expected_account_id}."
         )
 
     resource_type = parsed_arn["resource_type"]
@@ -217,7 +231,6 @@ def resolve_by_arn(
             account=account,
             region=region,
             eni_id=resource_id,
-            original_arn=arn,
         )
 
     if resource_type == "instance":
@@ -226,7 +239,6 @@ def resolve_by_arn(
             account=account,
             region=region,
             instance_id=resource_id,
-            original_arn=arn,
         )
 
     raise SelectorResolutionError(
@@ -268,7 +280,9 @@ def resolve_by_tags(
         candidate_list = ", ".join(_format_candidate(candidate) for candidate in discovered_targets)
         raise SelectorResolutionError(
             "selector.tags matched multiple supported v1 targets in account "
-            f"'{account}' and region '{region}': {candidate_list}"
+            f"'{account}' and region '{region}': {candidate_list}. "
+            "v1 enforces tag uniqueness before normalization, even if multiple matches would "
+            "normalize to the same ENI."
         )
 
     return discovered_targets[0]
@@ -279,7 +293,6 @@ def _resolve_eni(
     account: str,
     region: str,
     eni_id: str,
-    original_arn: str | None = None,
 ) -> DiscoveredTarget:
     """Resolve one ENI by ID."""
 
@@ -312,7 +325,6 @@ def _resolve_eni(
     )
     arn = _require_str(
         interface.get("NetworkInterfaceArn")
-        or original_arn
         or _build_ec2_arn(
             region=region,
             account_id=owner_id,
@@ -339,7 +351,6 @@ def _resolve_instance(
     account: str,
     region: str,
     instance_id: str,
-    original_arn: str | None = None,
 ) -> DiscoveredTarget:
     """Resolve one EC2 instance by ID."""
 
@@ -372,7 +383,7 @@ def _resolve_instance(
         primary_eni.get("NetworkInterfaceId"),
         f"Instance '{instance_id}' primary network interface is missing NetworkInterfaceId.",
     )
-    instance_arn = original_arn or _build_ec2_arn(
+    instance_arn = _build_ec2_arn(
         region=region,
         account_id=owner_id,
         resource_type="instance",
@@ -406,35 +417,40 @@ def _discover_enis_by_tags(
     tags: dict[str, str],
 ) -> list[DiscoveredTarget]:
     """Discover ENIs that match the provided tag set."""
-
-    response = ec2_client.describe_network_interfaces(Filters=_tag_filters(tags))
     matches: list[DiscoveredTarget] = []
 
-    for interface in response.get("NetworkInterfaces", []):
-        eni_id = _require_str(
-            interface.get("NetworkInterfaceId"),
-            "A matched ENI is missing NetworkInterfaceId.",
-        )
-        owner_id = _require_str(
-            interface.get("OwnerId"),
-            f"Matched ENI '{eni_id}' is missing OwnerId.",
-        )
-        arn = interface.get("NetworkInterfaceArn") or _build_ec2_arn(
-            region=region,
-            account_id=owner_id,
-            resource_type="network-interface",
-            resource_id=eni_id,
-        )
-        matches.append(
-            DiscoveredTarget(
-                account=account,
-                region=region,
-                target_type="eni",
-                resource_id=eni_id,
-                arn=arn,
-                metadata={"owner_id": owner_id},
+    for response in _paginate_ec2(
+        ec2_client,
+        "describe_network_interfaces",
+        Filters=_tag_filters(tags),
+    ):
+        for interface in response.get("NetworkInterfaces", []):
+            if not isinstance(interface, dict):
+                raise SelectorResolutionError("A matched ENI returned an invalid response shape.")
+            eni_id = _require_str(
+                interface.get("NetworkInterfaceId"),
+                "A matched ENI is missing NetworkInterfaceId.",
             )
-        )
+            owner_id = _require_str(
+                interface.get("OwnerId"),
+                f"Matched ENI '{eni_id}' is missing OwnerId.",
+            )
+            arn = interface.get("NetworkInterfaceArn") or _build_ec2_arn(
+                region=region,
+                account_id=owner_id,
+                resource_type="network-interface",
+                resource_id=eni_id,
+            )
+            matches.append(
+                DiscoveredTarget(
+                    account=account,
+                    region=region,
+                    target_type="eni",
+                    resource_id=eni_id,
+                    arn=arn,
+                    metadata={"owner_id": owner_id},
+                )
+            )
 
     return matches
 
@@ -446,45 +462,48 @@ def _discover_instances_by_tags(
     tags: dict[str, str],
 ) -> list[DiscoveredTarget]:
     """Discover instances that match the provided tag set."""
-
-    response = ec2_client.describe_instances(Filters=_tag_filters(tags))
     matches: list[DiscoveredTarget] = []
 
-    for owner_id, instance in _flatten_instances(response):
-        instance_id = _require_str(
-            instance.get("InstanceId"),
-            "A matched EC2 instance is missing InstanceId.",
-        )
-        primary_eni = _extract_primary_eni(instance, instance_id)
-        primary_eni_id = _require_str(
-            primary_eni.get("NetworkInterfaceId"),
-            f"Matched EC2 instance '{instance_id}' primary network interface "
-            "is missing NetworkInterfaceId.",
-        )
-        matches.append(
-            DiscoveredTarget(
-                account=account,
-                region=region,
-                target_type="ec2_instance",
-                resource_id=instance_id,
-                arn=_build_ec2_arn(
+    for response in _paginate_ec2(
+        ec2_client,
+        "describe_instances",
+        Filters=_tag_filters(tags),
+    ):
+        for owner_id, instance in _flatten_instances(response):
+            instance_id = _require_str(
+                instance.get("InstanceId"),
+                "A matched EC2 instance is missing InstanceId.",
+            )
+            primary_eni = _extract_primary_eni(instance, instance_id)
+            primary_eni_id = _require_str(
+                primary_eni.get("NetworkInterfaceId"),
+                f"Matched EC2 instance '{instance_id}' primary network interface "
+                "is missing NetworkInterfaceId.",
+            )
+            matches.append(
+                DiscoveredTarget(
+                    account=account,
                     region=region,
-                    account_id=owner_id,
-                    resource_type="instance",
+                    target_type="ec2_instance",
                     resource_id=instance_id,
-                ),
-                metadata={
-                    "owner_id": owner_id,
-                    "primary_eni_id": primary_eni_id,
-                    "primary_eni_arn": _build_ec2_arn(
+                    arn=_build_ec2_arn(
                         region=region,
                         account_id=owner_id,
-                        resource_type="network-interface",
-                        resource_id=primary_eni_id,
+                        resource_type="instance",
+                        resource_id=instance_id,
                     ),
-                },
+                    metadata={
+                        "owner_id": owner_id,
+                        "primary_eni_id": primary_eni_id,
+                        "primary_eni_arn": _build_ec2_arn(
+                            region=region,
+                            account_id=owner_id,
+                            resource_type="network-interface",
+                            resource_id=primary_eni_id,
+                        ),
+                    },
+                )
             )
-        )
 
     return matches
 
@@ -543,17 +562,69 @@ def _normalize_discovered_target(
     )
 
 
+def _paginate_ec2(
+    ec2_client: Any,
+    operation_name: Literal["describe_network_interfaces", "describe_instances"],
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
+    """Return all pages for an EC2 describe operation."""
+
+    if hasattr(ec2_client, "get_paginator"):
+        paginator = ec2_client.get_paginator(operation_name)
+        return list(paginator.paginate(**kwargs))
+
+    operation = getattr(ec2_client, operation_name)
+    pages: list[dict[str, Any]] = []
+    next_token: str | None = None
+
+    while True:
+        request_kwargs = dict(kwargs)
+        if next_token is not None:
+            request_kwargs["NextToken"] = next_token
+
+        response = operation(**request_kwargs)
+        pages.append(response)
+
+        token = response.get("NextToken")
+        if not isinstance(token, str) or not token:
+            break
+        next_token = token
+
+    return pages
+
+
+def _configured_account_id(ec2_client: Any) -> str | None:
+    """Return the effective account ID when the client exposes it."""
+
+    account_id = getattr(ec2_client, "account_id", None)
+    if isinstance(account_id, str) and account_id:
+        return account_id
+
+    return None
+
+
 def _flatten_instances(response: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Flatten EC2 reservations into owner-aware instance tuples."""
 
     instances: list[tuple[str, dict[str, Any]]] = []
 
     for reservation in response.get("Reservations", []):
+        if not isinstance(reservation, dict):
+            raise SelectorResolutionError("An EC2 reservation returned an invalid response shape.")
         owner_id = _require_str(
             reservation.get("OwnerId"),
             "An EC2 reservation is missing OwnerId.",
         )
-        for instance in reservation.get("Instances", []):
+        raw_instances = reservation.get("Instances", [])
+        if not isinstance(raw_instances, list):
+            raise SelectorResolutionError(
+                f"EC2 reservation for owner '{owner_id}' returned an invalid Instances shape."
+            )
+        for instance in raw_instances:
+            if not isinstance(instance, dict):
+                raise SelectorResolutionError(
+                    f"EC2 reservation for owner '{owner_id}' returned an invalid instance shape."
+                )
             instances.append((owner_id, instance))
 
     return instances
@@ -562,10 +633,21 @@ def _flatten_instances(response: dict[str, Any]) -> list[tuple[str, dict[str, An
 def _extract_primary_eni(instance: dict[str, Any], instance_id: str) -> dict[str, Any]:
     """Return the single primary ENI for an instance."""
 
+    raw_interfaces = instance.get("NetworkInterfaces")
+    if not isinstance(raw_interfaces, list):
+        raise SelectorResolutionError(
+            f"EC2 instance '{instance_id}' returned an invalid NetworkInterfaces shape."
+        )
+
+    if not raw_interfaces:
+        raise SelectorResolutionError(
+            f"EC2 instance '{instance_id}' did not include any network interfaces."
+        )
+
     primary_interfaces = [
         interface
-        for interface in instance.get("NetworkInterfaces", [])
-        if interface.get("Attachment", {}).get("DeviceIndex") == 0
+        for interface in raw_interfaces
+        if isinstance(interface, dict) and interface.get("Attachment", {}).get("DeviceIndex") == 0
     ]
 
     if len(primary_interfaces) != 1:
@@ -620,7 +702,7 @@ def _format_candidate(candidate: DiscoveredTarget) -> str:
 def _build_ec2_arn(region: str, account_id: str, resource_type: str, resource_id: str) -> str:
     """Build a canonical EC2 ARN."""
 
-    return f"arn:aws:ec2:{region}:{account_id}:{resource_type}/{resource_id}"
+    return f"arn:{AWS_PARTITION}:ec2:{region}:{account_id}:{resource_type}/{resource_id}"
 
 
 def _require_str(value: Any, error_message: str) -> str:

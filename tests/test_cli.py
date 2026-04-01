@@ -66,6 +66,38 @@ def test_init_command_refuses_partial_write_when_one_target_exists(tmp_path: Pat
     assert existing_example_path.read_text(encoding="utf-8") == "existing contents\n"
 
 
+def test_init_command_fails_when_examples_dir_path_is_a_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "preflight.yaml"
+    examples_dir = tmp_path / "examples-basic"
+    examples_dir.write_text("not a directory\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "-f",
+            str(config_path),
+            "--examples-dir",
+            str(examples_dir),
+        ],
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "Expected a directory path but found a file" in result.stdout
+    assert not config_path.exists()
+
+
+def test_init_command_fails_when_parent_path_is_a_file(tmp_path: Path) -> None:
+    blocking_parent = tmp_path / "blocked"
+    blocking_parent.write_text("not a directory\n", encoding="utf-8")
+    config_path = blocking_parent / "preflight.yaml"
+
+    result = runner.invoke(app, ["init", "-f", str(config_path)])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "Expected a directory path but found a file" in result.stdout
+
+
 def test_explain_command_returns_clean_error_for_unknown_assertion_id(tmp_path: Path) -> None:
     config_path = tmp_path / "preflight.yaml"
     config_path.write_text(STARTER_CONFIG_YAML, encoding="utf-8")

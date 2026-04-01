@@ -214,19 +214,32 @@ def _load_config_or_exit(path: Path) -> PreflightConfig:
 def _validate_writable_paths(paths: list[Path], force: bool) -> None:
     """Fail fast before writing if any target path would be rejected."""
 
-    if force:
-        return
-
     for path in paths:
-        if path.exists():
+        if path.exists() and path.is_dir():
+            _exit_config_error(f"Expected a file path but found a directory: {path}")
+
+        for ancestor in [path.parent, *path.parent.parents]:
+            if ancestor == ancestor.parent:
+                continue
+            if ancestor.exists() and not ancestor.is_dir():
+                if ancestor == path.parent and path.name == "preflight.yaml":
+                    _exit_config_error(f"Expected a directory path but found a file: {ancestor}")
+                _exit_config_error(
+                    f"Cannot create parent directory for {path}: {ancestor} is a file"
+                )
+
+        if path.exists() and not force:
             _exit_config_error(f"Refusing to overwrite existing file without --force: {path}")
 
 
 def _write_file(path: Path, contents: str) -> Path:
     """Write a file, creating parent directories as needed."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contents, encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
+    except OSError as exc:
+        _exit_config_error(f"Failed to write {path}: {exc}")
     return path
 
 
