@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from preflight.auth import AccountIdentityError, SessionFactory
 from preflight.discovery import (
     DiscoveredTarget,
     SelectorResolutionError,
@@ -11,7 +12,14 @@ from preflight.discovery import (
     resolve_target,
 )
 from preflight.models import Endpoint, PreflightConfig
-from tests.fakes import FakeEC2Client, FakeSessionFactory, make_eni, make_instance
+from tests.fakes import (
+    FakeEC2Client,
+    FakeSession,
+    FakeSessionFactory,
+    FakeSTSClient,
+    make_eni,
+    make_instance,
+)
 
 
 def build_config(selector: dict[str, Any]) -> tuple[PreflightConfig, Endpoint]:
@@ -236,6 +244,71 @@ def test_resolve_target_fails_for_arn_account_mismatch() -> None:
         resolve_target(config, endpoint, ec2_client=ec2_client)
 
 
+def test_resolve_assertion_targets_uses_effective_account_identity_for_matching_arn() -> None:
+    config, _ = build_config(
+        {"arn": "arn:aws:ec2:us-east-1:222222222222:network-interface/eni-0123456789abcdef0"}
+    )
+    session_factory = FakeSessionFactory(
+        {
+            "app": FakeEC2Client(
+                account_id="222222222222",
+                enis_by_id={
+                    "eni-0123456789abcdef0": make_eni("eni-0123456789abcdef0"),
+                    "eni-0fedcba9876543210": make_eni("eni-0fedcba9876543210"),
+                },
+            )
+        }
+    )
+
+    resolved_targets = resolve_assertion_targets(config, session_factory=session_factory)
+
+    assert len(resolved_targets) == 2
+    assert resolved_targets[0].target.input_arn.endswith("eni-0123456789abcdef0")
+
+
+def test_resolve_assertion_targets_fails_for_real_account_id_mismatch() -> None:
+    config, _ = build_config(
+        {"arn": "arn:aws:ec2:us-east-1:111111111111:network-interface/eni-0123456789abcdef0"}
+    )
+    session_factory = FakeSessionFactory(
+        {
+            "app": FakeEC2Client(
+                account_id="222222222222",
+                enis_by_id={
+                    "eni-0123456789abcdef0": make_eni("eni-0123456789abcdef0"),
+                    "eni-0fedcba9876543210": make_eni("eni-0fedcba9876543210"),
+                },
+            )
+        }
+    )
+
+    with pytest.raises(SelectorResolutionError, match="resolves in account 222222222222"):
+        resolve_assertion_targets(config, session_factory=session_factory)
+
+
+def test_resolve_assertion_targets_fails_when_account_identity_lookup_fails() -> None:
+    config, _ = build_config(
+        {"arn": "arn:aws:ec2:us-east-1:222222222222:network-interface/eni-0123456789abcdef0"}
+    )
+    session_factory = FakeSessionFactory(
+        {
+            "app": FakeEC2Client(
+                account_id="222222222222",
+                enis_by_id={
+                    "eni-0123456789abcdef0": make_eni("eni-0123456789abcdef0"),
+                    "eni-0fedcba9876543210": make_eni("eni-0fedcba9876543210"),
+                },
+            )
+        },
+        sts_clients_by_account={
+            "app": FakeSTSClient(raise_error=AccountIdentityError("identity lookup failed"))
+        },
+    )
+
+    with pytest.raises(AccountIdentityError, match="identity lookup failed"):
+        resolve_assertion_targets(config, session_factory=session_factory)
+
+
 def test_resolve_target_fails_for_unsupported_tag_match_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -357,3 +430,20 @@ def test_resolve_assertion_targets_returns_source_and_destination_targets() -> N
     assert len(resolved_targets) == 2
     assert resolved_targets[0].endpoint_role == "source"
     assert resolved_targets[1].endpoint_role == "destination"
+
+
+def test_session_factory_caches_effective_account_identity() -> None:
+    config, _ = build_config({"resource_id": "eni-0123456789abcdef0"})
+    session_factory = SessionFactory(config.defaults, config.accounts)
+    fake_sts = FakeSTSClient(account_id="222222222222")
+    fake_session = FakeSession(FakeEC2Client(account_id="222222222222"), fake_sts)
+
+    def fake_session_for_account(account_name: str, region: str | None = None) -> FakeSession:
+        _ = account_name, region
+        return fake_session
+
+    session_factory.session_for_account = fake_session_for_account  # type: ignore[method-assign]
+
+    assert session_factory.account_id_for_account("app") == "222222222222"
+    assert session_factory.account_id_for_account("app") == "222222222222"
+    assert fake_sts.get_caller_identity_calls == 1

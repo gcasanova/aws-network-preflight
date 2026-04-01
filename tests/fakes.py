@@ -104,6 +104,26 @@ class FakeEC2Client:
         return {"Reservations": list(self.tag_instances)}
 
 
+class FakeSTSClient:
+    def __init__(
+        self,
+        *,
+        account_id: str | None = "222222222222",
+        raise_error: Exception | None = None,
+    ) -> None:
+        self.account_id = account_id
+        self.raise_error = raise_error
+        self.get_caller_identity_calls = 0
+
+    def get_caller_identity(self) -> dict[str, Any]:
+        self.get_caller_identity_calls += 1
+        if self.raise_error is not None:
+            raise self.raise_error
+        if self.account_id is None:
+            return {}
+        return {"Account": self.account_id}
+
+
 class FakePaginator:
     def __init__(self, pages: list[dict[str, Any]]) -> None:
         self._pages = pages
@@ -122,19 +142,47 @@ class FakePaginator:
 
 
 class FakeSession:
-    def __init__(self, ec2_client: FakeEC2Client) -> None:
+    def __init__(self, ec2_client: FakeEC2Client, sts_client: FakeSTSClient | None = None) -> None:
         self._ec2_client = ec2_client
+        self._sts_client = sts_client or FakeSTSClient(account_id=ec2_client.account_id)
 
-    def client(self, service_name: str) -> FakeEC2Client:
-        if service_name != "ec2":
-            raise AssertionError(f"Unexpected service request: {service_name}")
-        return self._ec2_client
+    def client(self, service_name: str) -> Any:
+        if service_name == "ec2":
+            return self._ec2_client
+        if service_name == "sts":
+            return self._sts_client
+        raise AssertionError(f"Unexpected service request: {service_name}")
 
 
 class FakeSessionFactory:
-    def __init__(self, clients_by_account: dict[str, FakeEC2Client]) -> None:
+    def __init__(
+        self,
+        clients_by_account: dict[str, FakeEC2Client],
+        *,
+        sts_clients_by_account: dict[str, FakeSTSClient] | None = None,
+    ) -> None:
         self._clients_by_account = clients_by_account
+        self._sts_clients_by_account = sts_clients_by_account or {}
+        self._account_id_cache: dict[str, str] = {}
 
     def session_for_account(self, account_name: str, region: str | None = None) -> FakeSession:
         _ = region
-        return FakeSession(self._clients_by_account[account_name])
+        return FakeSession(
+            self._clients_by_account[account_name],
+            self._sts_clients_by_account.get(account_name),
+        )
+
+    def account_id_for_account(self, account_name: str, region: str | None = None) -> str:
+        _ = region
+        cached_account_id = self._account_id_cache.get(account_name)
+        if cached_account_id is not None:
+            return cached_account_id
+
+        session = self.session_for_account(account_name)
+        response = session.client("sts").get_caller_identity()
+        account_id = response.get("Account")
+        if not isinstance(account_id, str) or not account_id:
+            raise AssertionError(f"Fake STS client did not return an account ID for {account_name}")
+
+        self._account_id_cache[account_name] = account_id
+        return account_id

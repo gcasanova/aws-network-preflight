@@ -9,7 +9,7 @@ from typing import Annotated, NoReturn
 import typer
 from botocore.exceptions import BotoCoreError, ClientError
 
-from preflight.auth import SessionFactory
+from preflight.auth import AccountIdentityError, SessionFactory
 from preflight.config import STARTER_CONFIG_YAML, PreflightConfigError, load_config
 from preflight.discovery import SelectorResolutionError, resolve_assertion_targets
 from preflight.exit_codes import ExitCode
@@ -130,7 +130,7 @@ def list_targets(
 
     try:
         resolved_targets = resolve_assertion_targets(config, session_factory=session_factory)
-    except (SelectorResolutionError, BotoCoreError, ClientError) as exc:
+    except (SelectorResolutionError, AccountIdentityError, BotoCoreError, ClientError) as exc:
         _exit_runtime_error(str(exc))
 
     print_resolved_targets(console, resolved_targets)

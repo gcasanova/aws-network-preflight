@@ -76,6 +76,7 @@ def resolve_assertion_targets(
     effective_region = config.defaults.region
     resolved_targets: list[ResolvedAssertionTarget] = []
     client_cache: dict[str, Any] = {}
+    account_id_cache: dict[str, str] = {}
 
     if session_factory is None:
         session_factory = SessionFactory(config.defaults, config.accounts)
@@ -91,11 +92,16 @@ def resolve_assertion_targets(
             if account not in client_cache:
                 session = session_factory.session_for_account(account, region=effective_region)
                 client_cache[account] = session.client("ec2")
+                account_id_cache[account] = session_factory.account_id_for_account(
+                    account,
+                    region=effective_region,
+                )
 
             target = resolve_target(
                 config,
                 endpoint,
                 ec2_client=client_cache[account],
+                effective_account_id=account_id_cache[account],
             )
             resolved_targets.append(
                 ResolvedAssertionTarget(
@@ -113,6 +119,7 @@ def resolve_target(
     endpoint: Endpoint,
     session_factory: SessionFactory | None = None,
     ec2_client: Any | None = None,
+    effective_account_id: str | None = None,
 ) -> ResolvedTarget:
     """Resolve one endpoint into a concrete AWS target."""
 
@@ -126,6 +133,7 @@ def resolve_target(
 
         session = session_factory.session_for_account(account, region=region)
         ec2_client = session.client("ec2")
+        effective_account_id = session_factory.account_id_for_account(account, region=region)
 
     if selector.resource_id is not None:
         selector_type: SelectorType = "resource_id"
@@ -142,6 +150,7 @@ def resolve_target(
             account=account,
             region=region,
             arn=selector.arn,
+            effective_account_id=effective_account_id,
         )
     elif selector.tags is not None:
         selector_type = "tags"
@@ -198,11 +207,14 @@ def resolve_by_arn(
     account: str,
     region: str,
     arn: str,
+    effective_account_id: str | None = None,
 ) -> DiscoveredTarget:
     """Resolve a supported EC2 ARN."""
 
     parsed_arn = _parse_ec2_arn(arn)
-    expected_account_id = _configured_account_id(ec2_client)
+    expected_account_id = effective_account_id
+    if expected_account_id is None:
+        expected_account_id = _configured_account_id(ec2_client)
 
     if parsed_arn["partition"] != AWS_PARTITION:
         raise SelectorResolutionError(
