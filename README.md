@@ -186,3 +186,7 @@ The core promise of this tool is simple:
 Declare your AWS network intent in YAML and verify that connectivity still matches it.
 
 If we keep the implementation narrow, explicit, and AWS-native, it will stay more useful than a broader but vague tool.
+
+## License
+
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
