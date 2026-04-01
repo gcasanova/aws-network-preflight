@@ -278,7 +278,9 @@ def test_analyze_assertion_dedupes_duplicate_additional_accounts() -> None:
 
 def test_analyze_assertion_normalizes_botocore_runtime_errors() -> None:
     client = FakeReachabilityAnalyzerClient(
-        describe_analysis_error=EndpointConnectionError(endpoint_url="https://ec2.us-east-1.amazonaws.com")
+        describe_analysis_error=EndpointConnectionError(
+            endpoint_url="https://ec2.us-east-1.amazonaws.com"
+        )
     )
 
     with pytest.raises(ReachabilityAnalyzerError, match="Reachability Analyzer AWS SDK error"):
@@ -297,7 +299,9 @@ def test_analyze_assertion_normalizes_botocore_runtime_errors() -> None:
 
 def test_analyze_assertion_records_cleanup_botocore_errors() -> None:
     client = FakeReachabilityAnalyzerClient(
-        delete_path_error=EndpointConnectionError(endpoint_url="https://ec2.us-east-1.amazonaws.com")
+        delete_path_error=EndpointConnectionError(
+            endpoint_url="https://ec2.us-east-1.amazonaws.com"
+        )
     )
 
     result = analyze_assertion(
