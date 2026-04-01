@@ -86,7 +86,7 @@ The initial release should feel credible, boring in the right ways, and narrowly
 
 8. Separate orchestration from presentation.
    The runner should produce plain result objects. Console and JSON reporters should format those results without owning business logic.
-   For now, JSON rendering exists for the internal result objects, but it is not yet exposed as a user-facing CLI option.
+   JSON output should stay small and explicit. `run` and `explain` can expose `text` and `json`, but v1 should avoid a larger output-mode matrix.
 
 9. Avoid a plugin architecture.
    Future engines can fit behind a small internal interface, but v1 should not introduce registries, plugin loading, or extension frameworks.
@@ -180,7 +180,7 @@ This single-region rule is an intentional v1 simplification to keep discovery an
   - rich terminal output for validation, resolution, run summaries, and explain output
 
 - `preflight/reporters/json_report.py`
-  - machine-readable JSON output for CI integrations
+  - machine-readable JSON output for `run` and `explain`
 
 - `preflight/exit_codes.py`
   - stable, named exit-code constants
@@ -237,5 +237,5 @@ Phase 4 is now implemented for the narrow v1 scope. The remaining work is follow
 
 ## Open decisions to document as we build
 
-- When to expose the existing JSON result model as a stable CLI contract
+- How stable the JSON output contract should become for external CI consumers over time
 - Whether future versions should expose a user-controlled cleanup retention mode for debugging

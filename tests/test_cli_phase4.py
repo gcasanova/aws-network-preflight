@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -144,6 +145,34 @@ def test_run_command_exits_three_on_runtime_error(
     assert "Errors: 1" in result.stdout
 
 
+def test_run_command_supports_json_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        "preflight.cli.run_assertions",
+        lambda *args, **kwargs: RunSummary(
+            results=[
+                build_result(status="passed"),
+                build_result(
+                    status="failed",
+                    actual_outcome="not_reachable",
+                    message="Expected reachable but Reachability Analyzer reported not reachable.",
+                ),
+            ]
+        ),
+    )
+
+    result = runner.invoke(app, ["run", "-f", str(config_path), "--format", "json"])
+
+    assert result.exit_code == int(ExitCode.ASSERTION_FAILED)
+    payload = json.loads(result.stdout)
+    assert payload["passed_count"] == 1
+    assert payload["failed_count"] == 1
+    assert payload["results"][0]["assertion_id"] == "assertion-1"
+
+
 def test_explain_command_prints_successful_assertion_details(
     tmp_path: Path,
     monkeypatch,
@@ -185,3 +214,33 @@ def test_explain_command_prints_failed_assertion_details(
     assert result.exit_code == int(ExitCode.ASSERTION_FAILED)
     assert "SECURITY_GROUP_RULE_MISMATCH" in result.stdout
     assert "Expected reachable but Reachability Analyzer reported not reachable." in result.stdout
+
+
+def test_explain_command_supports_json_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        "preflight.cli.run_assertion",
+        lambda *args, **kwargs: build_result(
+            status="failed",
+            actual_outcome="not_reachable",
+            message="Expected reachable but Reachability Analyzer reported not reachable.",
+            normalized_source=True,
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["explain", "-f", str(config_path), "--id", "assertion-1", "--format", "json"],
+    )
+
+    assert result.exit_code == int(ExitCode.ASSERTION_FAILED)
+    payload = json.loads(result.stdout)
+    assert payload["assertion_id"] == "assertion-1"
+    assert payload["status"] == "failed"
+    assert payload["source"]["normalized"] is True
+    assert payload["message"] == (
+        "Expected reachable but Reachability Analyzer reported not reachable."
+    )

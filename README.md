@@ -53,7 +53,7 @@ The repository now covers the intended narrow v1 flow:
 - `explain`: execute one assertion with more detailed output
 
 The execution backend for v1 is AWS Reachability Analyzer only.
-The repository also includes a JSON reporter for the current internal result objects, but JSON output is not yet exposed as a CLI flag.
+`run` and `explain` support `--format text|json`, with text as the default.
 
 ## Example config
 
@@ -114,7 +114,49 @@ aws-network-preflight init
 aws-network-preflight validate -f preflight.yaml
 aws-network-preflight list-targets -f preflight.yaml
 aws-network-preflight run -f preflight.yaml
+aws-network-preflight run -f preflight.yaml --format json
 aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow
+aws-network-preflight explain -f preflight.yaml --id dev-to-shared-dns-allow --format json
+```
+
+## Example output
+
+Text output from `run`:
+
+```text
+                               Assertion Results
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Assertion ID             ┃ Expected      ┃ Actual        ┃ Status ┃ Analysis ID           ┃ Detail                                                       ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ dev-to-shared-dns-allow  │ reachable     │ reachable     │ passed │ nia-0abc123def456789 │ Expected reachable and Reachability Analyzer reported       │
+│                          │               │               │        │                       │ reachable.                                                  │
+│ dev-to-prod-db-deny      │ not reachable │ reachable     │ failed │ nia-0123abc456def789 │ Expected not reachable but Reachability Analyzer reported   │
+│                          │               │               │        │                       │ reachable.                                                  │
+└──────────────────────────┴───────────────┴───────────────┴────────┴───────────────────────┴──────────────────────────────────────────────────────────────┘
+Passed: 1  Failed: 1  Errors: 0
+```
+
+JSON output from `explain --format json`:
+
+```json
+{
+  "actual_outcome": "not_reachable",
+  "analysis_id": "nia-0123abc456def789",
+  "analysis_status": "succeeded",
+  "assertion_id": "dev-to-prod-db-deny",
+  "assertion_type": "deny",
+  "cleanup": {
+    "analysis_delete_attempted": true,
+    "analysis_delete_succeeded": true,
+    "errors": [],
+    "path_delete_attempted": true,
+    "path_delete_succeeded": true
+  },
+  "expected_outcome": "not_reachable",
+  "message": "Expected not reachable and Reachability Analyzer reported not reachable.",
+  "network_path_found": false,
+  "status": "passed"
+}
 ```
 
 ## Exit codes
@@ -173,8 +215,15 @@ pytest
 
 ## Roadmap
 
-- expose the existing JSON result model through a user-facing CLI output option
 - expand the supported target catalog carefully, not indiscriminately
+
+## Design choices
+
+- AWS-first because the tool is intentionally built around AWS-native network analysis instead of trying to paper over provider-specific behavior.
+- Single-region-only in v1 because discovery and execution semantics stay much clearer when every assertion resolves inside one explicit effective region.
+- Reachability Analyzer only in v1 because one trustworthy execution engine is more credible than multiple partially-supported analysis modes.
+- ENI as the canonical execution target because it is the most precise AWS networking anchor for path analysis, while EC2 instance support keeps the CLI ergonomic.
+- Narrow by design because a public v1 should solve a small slice of AWS networking well instead of claiming broad coverage with caveats everywhere.
 
 ## Project direction
 

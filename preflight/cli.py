@@ -22,6 +22,7 @@ from preflight.reporters.console import (
     print_run_summary,
     print_validation_success,
 )
+from preflight.reporters.json_report import render_json
 from preflight.runner import AssertionNotFoundError, run_assertion, run_assertions
 
 app = typer.Typer(
@@ -39,6 +40,16 @@ class CLIContext:
 
 
 console = build_console()
+OutputFormat = Annotated[
+    str,
+    typer.Option(
+        "--format",
+        help="Output format for command results.",
+        case_sensitive=False,
+        show_default=True,
+        rich_help_panel="Output",
+    ),
+]
 
 
 @app.callback()
@@ -148,18 +159,23 @@ def run(
             help="Path to the YAML config file.",
         ),
     ] = Path("preflight.yaml"),
+    output_format: OutputFormat = "text",
 ) -> None:
     """Run all assertions and fail if any assertion fails."""
 
     config = _load_config_or_exit(file)
     cli_context = _cli_context(ctx)
+    normalized_format = _normalize_output_format(output_format)
 
     try:
         summary = run_assertions(config, profile_override=cli_context.profile_override)
     except (SelectorResolutionError, AccountIdentityError, BotoCoreError, ClientError) as exc:
         _exit_runtime_error(str(exc))
 
-    print_run_summary(console, summary)
+    if normalized_format == "json":
+        typer.echo(render_json(summary))
+    else:
+        print_run_summary(console, summary)
 
     if summary.error_count:
         raise typer.Exit(code=int(ExitCode.RUNTIME_ERROR))
@@ -183,11 +199,13 @@ def explain(
             help="Path to the YAML config file.",
         ),
     ] = Path("preflight.yaml"),
+    output_format: OutputFormat = "text",
 ) -> None:
     """Explain one assertion in detail."""
 
     config = _load_config_or_exit(file)
     cli_context = _cli_context(ctx)
+    normalized_format = _normalize_output_format(output_format)
 
     try:
         result = run_assertion(config, assertion_id, profile_override=cli_context.profile_override)
@@ -196,7 +214,10 @@ def explain(
     except (SelectorResolutionError, AccountIdentityError, BotoCoreError, ClientError) as exc:
         _exit_runtime_error(str(exc))
 
-    print_assertion_explanation(console, result)
+    if normalized_format == "json":
+        typer.echo(render_json(result))
+    else:
+        print_assertion_explanation(console, result)
 
     if result.status == "error":
         raise typer.Exit(code=int(ExitCode.RUNTIME_ERROR))
@@ -222,6 +243,17 @@ def _load_config_or_exit(path: Path) -> PreflightConfig:
         return load_config(path)
     except PreflightConfigError as exc:
         _exit_config_error(str(exc))
+
+
+def _normalize_output_format(output_format: str) -> str:
+    """Validate and normalize the requested output format."""
+
+    normalized = output_format.lower()
+    if normalized in {"text", "json"}:
+        return normalized
+    _exit_config_error(
+        f"Unsupported --format value '{output_format}'. Supported values: text, json."
+    )
 
 
 def _validate_writable_paths(paths: list[Path], force: bool) -> None:
