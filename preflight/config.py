@@ -20,44 +20,39 @@ defaults:
     profile: default
 
 accounts:
-  shared:
-    role_arn: arn:aws:iam::111111111111:role/PreflightReadRole
-    regions: [us-east-1]
-
-  app:
-    role_arn: arn:aws:iam::222222222222:role/PreflightReadRole
+  lab:
     regions: [us-east-1]
 
 assertions:
-  - id: dev-to-shared-dns-allow
+  - id: client-to-server-443-allow
     type: allow
     source:
-      account: app
+      account: lab
       selector:
         tags:
-          Name: app-dev-ec2
+          Name: client
     destination:
-      account: shared
+      account: lab
       selector:
         tags:
-          Name: shared-dns-endpoint
+          Name: server
     protocol: tcp
-    port: 53
+    port: 443
 
-  - id: dev-to-prod-db-deny
+  - id: client-to-server-80-deny
     type: deny
     source:
-      account: app
+      account: lab
       selector:
         tags:
-          Name: app-dev-ec2
+          Name: client
     destination:
-      account: app
+      account: lab
       selector:
         tags:
-          Name: app-prod-db
+          Name: server
     protocol: tcp
-    port: 5432
+    port: 80
 """
 
 

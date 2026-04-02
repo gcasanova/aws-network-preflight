@@ -14,7 +14,8 @@ def test_load_config_accepts_valid_example(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.version == 1
-    assert len(config.accounts) == 2
+    assert list(config.accounts) == ["lab"]
+    assert config.accounts["lab"].role_arn is None
     assert len(config.assertions) == 2
 
 

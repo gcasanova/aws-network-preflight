@@ -40,6 +40,8 @@ def test_init_command_creates_config_and_example_files(tmp_path: Path) -> None:
     assert result.exit_code == int(ExitCode.OK)
     assert config_path.exists()
     assert (examples_dir / "preflight.yaml").exists()
+    assert config_path.read_text(encoding="utf-8") == STARTER_CONFIG_YAML
+    assert (examples_dir / "preflight.yaml").read_text(encoding="utf-8") == STARTER_CONFIG_YAML
 
 
 def test_init_command_refuses_partial_write_when_one_target_exists(tmp_path: Path) -> None:

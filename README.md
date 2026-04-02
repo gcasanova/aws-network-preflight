@@ -4,9 +4,9 @@
 
 Declare allowed and denied AWS connectivity in YAML and verify it with AWS Reachability Analyzer.
 
-`aws-network-preflight` is a CLI for platform, SRE, and networking teams that want to describe expected AWS connectivity in version-controlled YAML and verify it with AWS Reachability Analyzer. It is useful when you need a practical way to catch drift in security groups, routes, and attachments before that drift turns into a broken deployment or an incident.
+`aws-network-preflight` is a Python CLI for platform, SRE, and networking teams that want to describe expected AWS connectivity in version-controlled YAML and verify it with AWS Reachability Analyzer. It helps catch drift in security groups, routes, and attachments before that drift turns into a broken deployment or an incident.
 
-It is intentionally narrow: v1 focuses on single-region AWS connectivity validation for EC2 instances and ENIs.
+The scope is intentionally narrow. v1 focuses on single-region AWS connectivity validation for EC2 instances and ENIs.
 
 ## Why this exists
 
@@ -22,21 +22,34 @@ This project exists to make expected connectivity explicit and testable:
 
 Python 3.11+ is required.
 
-Install from source:
+### Recommended install
+
+Install from PyPI:
+
+```bash
+pipx install aws-network-preflight
+```
+
+That gives you a globally available CLI in an isolated environment.
+
+### Install from source
+
+Install from source for local development:
 
 ```bash
 git clone https://github.com/gcasanova/aws-network-preflight.git
-cd aws-network-preflight
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+python3 -m venv ~/venvs/anp
+source ~/venvs/anp/bin/activate
+pip install -e ./aws-network-preflight
 ```
 
-The CLI uses the default AWS credential chain by default, supports `--profile`, and can assume per-account `role_arn` values defined in the config.
-
-You will need AWS credentials and permissions that can read the referenced resources and run Reachability Analyzer in the configured accounts.
+This keeps the virtual environment outside the repository instead of creating a local `.venv` inside the source tree.
 
 `anp` is the short alias for `aws-network-preflight`.
+
+The CLI uses the AWS credential chain and supports profile-based authentication. For multi-account setups, logical accounts can also define per-account `role_arn` values to assume.
+
+You will need AWS credentials and permissions that can read the referenced resources and run Reachability Analyzer in the configured accounts.
 
 ## Quick start
 
@@ -46,13 +59,13 @@ Create a starter config:
 anp init
 ```
 
-Validate the starter config to confirm the CLI is installed and working:
+Edit `preflight.yaml` with your real AWS profile, region, accounts, and selectors.
+
+Validate the config:
 
 ```bash
 anp validate -f preflight.yaml
 ```
-
-Then edit `preflight.yaml` with your real AWS account details, role ARNs, regions, and selectors before using `list-targets` or `run`.
 
 Resolve the configured targets without running analysis:
 
@@ -66,9 +79,68 @@ Run the assertions:
 anp run -f preflight.yaml
 ```
 
+Inspect one assertion in detail:
+
+```bash
+anp explain -f preflight.yaml --id client-to-server-443-allow
+```
+
 For CI-friendly output, `run` and `explain` also support `--format json`.
 
-## Example config
+## Minimal example config
+
+This is the simplest same-account profile-based shape:
+
+```yaml
+version: 1
+
+defaults:
+  region: us-east-1
+  auth:
+    mode: profile
+    profile: default
+
+accounts:
+  lab:
+    regions: [us-east-1]
+
+assertions:
+  - id: client-to-server-443-allow
+    type: allow
+    source:
+      account: lab
+      selector:
+        tags:
+          Name: client
+    destination:
+      account: lab
+      selector:
+        tags:
+          Name: server
+    protocol: tcp
+    port: 443
+
+  - id: client-to-server-80-deny
+    type: deny
+    source:
+      account: lab
+      selector:
+        tags:
+          Name: client
+    destination:
+      account: lab
+      selector:
+        tags:
+          Name: server
+    protocol: tcp
+    port: 80
+```
+
+`role_arn` is optional for simple same-account profile-based usage. For multi-account configurations, each logical account can also define a `role_arn` to assume.
+
+## Cross-account example
+
+For multi-account setups, logical accounts can carry their own role assumptions:
 
 ```yaml
 version: 1
@@ -129,7 +201,7 @@ Common tasks:
 anp run -f preflight.yaml
 
 # inspect one assertion in detail
-anp explain -f preflight.yaml --id dev-to-shared-dns-allow
+anp explain -f preflight.yaml --id client-to-server-443-allow
 
 # emit machine-readable output for CI
 anp run -f preflight.yaml --format json
@@ -142,9 +214,9 @@ Text output from `run`:
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Assertion ID             ┃ Expected      ┃ Actual        ┃ Status ┃ Analysis ID           ┃ Detail                                                       ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ dev-to-shared-dns-allow  │ reachable     │ reachable     │ passed │ nia-0abc123def456789 │ Expected reachable and Reachability Analyzer reported       │
+│ client-to-server-443-allow │ reachable     │ reachable     │ passed │ nia-0abc123def456789 │ Expected reachable and Reachability Analyzer reported       │
 │                          │               │               │        │                       │ reachable.                                                  │
-│ dev-to-prod-db-deny      │ not reachable │ reachable     │ failed │ nia-0123abc456def789 │ Expected not reachable but Reachability Analyzer reported   │
+│ client-to-server-80-deny │ not reachable │ reachable     │ failed │ nia-0123abc456def789 │ Expected not reachable but Reachability Analyzer reported   │
 │                          │               │               │        │                       │ reachable.                                                  │
 └──────────────────────────┴───────────────┴───────────────┴────────┴───────────────────────┴──────────────────────────────────────────────────────────────┘
 Passed: 1  Failed: 1  Errors: 0
@@ -160,13 +232,13 @@ JSON output from `run --format json`:
   "results": [
     {
       "actual_outcome": "reachable",
-      "assertion_id": "dev-to-shared-dns-allow",
+      "assertion_id": "client-to-server-443-allow",
       "expected_outcome": "reachable",
       "status": "passed"
     },
     {
       "actual_outcome": "reachable",
-      "assertion_id": "dev-to-prod-db-deny",
+      "assertion_id": "client-to-server-80-deny",
       "expected_outcome": "not_reachable",
       "status": "failed"
     }
@@ -174,20 +246,29 @@ JSON output from `run --format json`:
 }
 ```
 
-Exit codes:
+## Exit codes
 
 - `0`: all assertions passed
 - `1`: one or more assertions failed
 - `2`: config or validation error
 - `3`: runtime, AWS API, or authentication error
 
+## Demo
+
+A short terminal demo showing config validation, target resolution, real Reachability Analyzer execution, and assertion inspection will be added here.
+
+<!-- Example:
+[Demo video](...)
+![aws-network-preflight demo](docs/demo/anp-demo.gif)
+-->
+
 ## Design choices
 
 The scope is intentionally narrow because the goal is a reliable v1, not a vague networking framework.
 
 - AWS-first because the tool is built around AWS-native analysis and AWS account boundaries, not generic abstractions.
-- Single-region-only in v1 because discovery and execution are much easier to reason about when every assertion runs in one explicit effective region from `defaults.region`.
-- Reachability Analyzer only in v1 because one trustworthy engine is more useful than several partially-supported analysis modes.
+- Single-region-only in v1 because discovery and execution are easier to reason about when every assertion runs in one explicit effective region from `defaults.region`.
+- Reachability Analyzer only in v1 because one trustworthy engine is more useful than several partially supported analysis modes.
 - ENI as the canonical execution target because it is the most precise AWS networking anchor for path analysis.
 - EC2 instance as a convenience input because it keeps the CLI practical while still normalizing execution to one concrete ENI.
 - Narrow target-family support because public v1 credibility comes from being explicit about what the tool does support, not by implying it solves all of AWS networking.
@@ -207,14 +288,27 @@ The scope is intentionally narrow because the goal is a reliable v1, not a vague
 Install development dependencies and run the local checks:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+git clone https://github.com/gcasanova/aws-network-preflight.git
+python3 -m venv ~/venvs/anp-dev
+source ~/venvs/anp-dev/bin/activate
+pip install -e "./aws-network-preflight[dev]"
+cd aws-network-preflight
 ruff check .
 ruff format --check .
 mypy preflight
 pytest
 ```
+
+## Contributing
+
+Issues, feedback, and contributions are welcome.
+
+A good first contribution is usually one of these:
+
+- improve documentation and examples
+- tighten validation and error messages
+- add focused test coverage for supported v1 behavior
+- improve local UX without broadening the scope carelessly
 
 ## License
 
