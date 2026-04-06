@@ -221,15 +221,15 @@ anp run -f preflight.yaml --format json
 Text output from `run`:
 
 ```text
-                               Assertion Results
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Assertion ID             ┃ Expected      ┃ Actual        ┃ Status ┃ Analysis ID           ┃ Detail                                                       ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ client-to-server-443-allow │ reachable     │ reachable     │ passed │ nia-0abc123def456789 │ Expected reachable and Reachability Analyzer reported       │
-│                          │               │               │        │                       │ reachable.                                                  │
-│ client-to-server-80-deny │ not reachable │ reachable     │ failed │ nia-0123abc456def789 │ Expected not reachable but Reachability Analyzer reported   │
-│                          │               │               │        │                       │ reachable.                                                  │
-└──────────────────────────┴───────────────┴───────────────┴────────┴───────────────────────┴──────────────────────────────────────────────────────────────┘
+                                                                     Assertion Results
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Assertion ID                ┃ Expected      ┃ Actual        ┃ Status ┃ Analysis ID          ┃ Detail                                                     ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ client-to-server-443-allow  │ reachable     │ reachable     │ passed │ nia-0abc123def456789 │ Expected reachable and Reachability Analyzer reported      │
+│                             │               │               │        │                      │ reachable.                                                 │
+│ client-to-server-80-deny    │ not reachable │ reachable     │ failed │ nia-0123abc456def789 │ Expected not reachable but Reachability Analyzer reported  │
+│                             │               │               │        │                      │ reachable.                                                 │
+└─────────────────────────────┴───────────────┴───────────────┴────────┴──────────────────────┴────────────────────────────────────────────────────────────┘
 Passed: 1  Failed: 1  Errors: 0
 ```
 
