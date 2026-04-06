@@ -192,6 +192,17 @@ assertions:
     port: 5432
 ```
 
+## Recommended IAM permissions
+
+At a minimum, the CLI usually needs enough access to discover the selected resources, run Reachability Analyzer, and identify the effective AWS account for each configured session.
+
+- Discovery: `ec2:DescribeInstances`, `ec2:DescribeNetworkInterfaces`
+- Reachability Analyzer execution: `ec2:CreateNetworkInsightsPath`, `ec2:DeleteNetworkInsightsPath`, `ec2:StartNetworkInsightsAnalysis`, `ec2:DescribeNetworkInsightsAnalyses`, `ec2:DeleteNetworkInsightsAnalysis`
+- Identity and account resolution: `sts:GetCallerIdentity`
+- Cross-account usage with `role_arn`: `sts:AssumeRole`
+
+The exact policy can vary by account structure and whether you use same-account credentials or cross-account role assumption.
+
 ## Example commands and output
 
 Common tasks:
@@ -245,6 +256,14 @@ JSON output from `run --format json`:
   ]
 }
 ```
+
+## Troubleshooting
+
+- `Unable to locate credentials`: the AWS credential chain did not find usable credentials. Check your environment, local AWS config, or the profile referenced in `defaults.auth.profile`.
+- `AccessDenied` or `UnauthorizedOperation`: the active credentials can reach AWS but do not have one or more required EC2 or STS permissions. Check discovery permissions, Reachability Analyzer permissions, and `sts:AssumeRole` when `role_arn` is configured.
+- Tag selector matches no resources: the selected account, region, or tag values do not resolve to a supported v1 target. Check `defaults.region`, the endpoint `account`, and the exact tag key and value on the EC2 instance or ENI.
+- Tag selector matches multiple resources: the selector is not unique within the configured account and region. Tighten the tag set until it resolves to exactly one EC2 instance or ENI.
+- Reachability Analyzer finished with `failed` or another unexpected status: AWS did not produce a normal successful analysis result. Check the detailed error output first, then confirm the source and destination resolved to the intended ENIs and that the execution account has the required Reachability Analyzer permissions.
 
 ## Exit codes
 
