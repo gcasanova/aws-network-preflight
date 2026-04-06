@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+import boto3
 from botocore.exceptions import ClientError
+
+
+def boto3_client(service_name: str, *, region: str = "us-east-1") -> Any:
+    return boto3.Session(
+        aws_access_key_id="testing",
+        aws_secret_access_key="testing",
+        aws_session_token="testing",
+        region_name=region,
+    ).client(service_name)
 
 
 def make_eni(

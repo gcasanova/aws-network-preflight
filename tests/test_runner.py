@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from botocore.stub import Stubber
 
 from preflight.discovery import ResolvedAssertionTarget, ResolvedTarget
 from preflight.engines.reachability_analyzer import (
@@ -12,6 +13,7 @@ from preflight.engines.reachability_analyzer import (
 )
 from preflight.models import PreflightConfig, Selector
 from preflight.runner import run_assertion, run_assertions
+from tests.fakes import boto3_client
 
 
 class StaticSession:
@@ -103,6 +105,59 @@ def build_analysis_result(actual_outcome: str) -> ReachabilityAnalysisResult:
         network_path_found=actual_outcome == "reachable",
         path_id="nip-1234567890abcdef0",
         analysis_id="nia-1234567890abcdef0",
+    )
+
+
+def add_successful_analysis_flow(
+    stubber: Stubber,
+    *,
+    network_path_found: bool,
+) -> None:
+    stubber.add_response(
+        "create_network_insights_path",
+        {
+            "NetworkInsightsPath": {
+                "NetworkInsightsPathId": "nip-1234567890abcdef0",
+            }
+        },
+        {
+            "Source": "eni-0123456789abcdef0",
+            "Destination": "eni-0fedcba9876543210",
+            "Protocol": "tcp",
+            "DestinationPort": 443,
+        },
+    )
+    stubber.add_response(
+        "start_network_insights_analysis",
+        {
+            "NetworkInsightsAnalysis": {
+                "NetworkInsightsAnalysisId": "nia-1234567890abcdef0",
+            }
+        },
+        {"NetworkInsightsPathId": "nip-1234567890abcdef0"},
+    )
+    stubber.add_response(
+        "describe_network_insights_analyses",
+        {
+            "NetworkInsightsAnalyses": [
+                {
+                    "NetworkInsightsAnalysisId": "nia-1234567890abcdef0",
+                    "Status": "succeeded",
+                    "NetworkPathFound": network_path_found,
+                }
+            ]
+        },
+        {"NetworkInsightsAnalysisIds": ["nia-1234567890abcdef0"]},
+    )
+    stubber.add_response(
+        "delete_network_insights_analysis",
+        {"NetworkInsightsAnalysisId": "nia-1234567890abcdef0"},
+        {"NetworkInsightsAnalysisId": "nia-1234567890abcdef0"},
+    )
+    stubber.add_response(
+        "delete_network_insights_path",
+        {"NetworkInsightsPathId": "nip-1234567890abcdef0"},
+        {"NetworkInsightsPathId": "nip-1234567890abcdef0"},
     )
 
 
@@ -207,6 +262,100 @@ def test_analysis_execution_error_is_reported_as_error(
     assert summary.results[0].status == "error"
     assert summary.results[0].actual_outcome == "error"
     assert summary.results[0].analysis_id == "nia-1234567890abcdef0"
+
+
+def test_run_assertions_interprets_stubbed_not_reachable_analysis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = build_config(assertion_type="deny")
+    monkeypatch.setattr(
+        "preflight.runner.resolve_assertion_targets",
+        lambda *args, **kwargs: build_resolved_targets(),
+    )
+    ec2_client = boto3_client("ec2")
+
+    with Stubber(ec2_client) as stubber:
+        add_successful_analysis_flow(stubber, network_path_found=False)
+        result = run_assertions(
+            config,
+            session_factory=StaticSessionFactory(ec2_client),
+            poll_interval_seconds=0.0,
+        ).results[0]
+        stubber.assert_no_pending_responses()
+
+    assert result.status == "passed"
+    assert result.expected_outcome == "not_reachable"
+    assert result.actual_outcome == "not_reachable"
+    assert result.analysis_status == "succeeded"
+
+
+def test_run_assertions_reports_failed_analysis_status_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = build_config(assertion_type="allow")
+    monkeypatch.setattr(
+        "preflight.runner.resolve_assertion_targets",
+        lambda *args, **kwargs: build_resolved_targets(),
+    )
+    ec2_client = boto3_client("ec2")
+
+    with Stubber(ec2_client) as stubber:
+        stubber.add_response(
+            "create_network_insights_path",
+            {"NetworkInsightsPath": {"NetworkInsightsPathId": "nip-1234567890abcdef0"}},
+            {
+                "Source": "eni-0123456789abcdef0",
+                "Destination": "eni-0fedcba9876543210",
+                "Protocol": "tcp",
+                "DestinationPort": 443,
+            },
+        )
+        stubber.add_response(
+            "start_network_insights_analysis",
+            {
+                "NetworkInsightsAnalysis": {
+                    "NetworkInsightsAnalysisId": "nia-1234567890abcdef0",
+                }
+            },
+            {"NetworkInsightsPathId": "nip-1234567890abcdef0"},
+        )
+        stubber.add_response(
+            "describe_network_insights_analyses",
+            {
+                "NetworkInsightsAnalyses": [
+                    {
+                        "NetworkInsightsAnalysisId": "nia-1234567890abcdef0",
+                        "Status": "failed",
+                        "StatusMessage": "analysis failed",
+                        "Explanations": [{"ExplanationCode": "UNKNOWN", "Port": 443}],
+                    }
+                ]
+            },
+            {"NetworkInsightsAnalysisIds": ["nia-1234567890abcdef0"]},
+        )
+        stubber.add_response(
+            "delete_network_insights_analysis",
+            {"NetworkInsightsAnalysisId": "nia-1234567890abcdef0"},
+            {"NetworkInsightsAnalysisId": "nia-1234567890abcdef0"},
+        )
+        stubber.add_response(
+            "delete_network_insights_path",
+            {"NetworkInsightsPathId": "nip-1234567890abcdef0"},
+            {"NetworkInsightsPathId": "nip-1234567890abcdef0"},
+        )
+
+        result = run_assertions(
+            config,
+            session_factory=StaticSessionFactory(ec2_client),
+            poll_interval_seconds=0.0,
+        ).results[0]
+        stubber.assert_no_pending_responses()
+
+    assert result.status == "error"
+    assert result.actual_outcome == "error"
+    assert result.analysis_status == "failed"
+    assert result.status_message == "analysis failed"
+    assert result.explanation_summary == "UNKNOWN: port 443"
 
 
 def test_cleanup_failure_turns_otherwise_successful_analysis_into_error(

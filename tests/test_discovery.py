@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from botocore.stub import Stubber
 
 from preflight.auth import AccountIdentityError, SessionFactory
 from preflight.discovery import (
@@ -17,6 +18,7 @@ from tests.fakes import (
     FakeSession,
     FakeSessionFactory,
     FakeSTSClient,
+    boto3_client,
     make_eni,
     make_instance,
 )
@@ -170,6 +172,40 @@ def test_resolve_unique_target_by_tags() -> None:
     assert resolved.resolved_identifier == "eni-0123456789abcdef0"
 
 
+def test_resolve_unique_target_by_tags_with_stubber() -> None:
+    config, endpoint = build_config({"tags": {"Name": "app-dev"}})
+    ec2_client = boto3_client("ec2")
+    expected_filters = [{"Name": "tag:Name", "Values": ["app-dev"]}]
+
+    with Stubber(ec2_client) as stubber:
+        stubber.add_response(
+            "describe_network_interfaces",
+            {
+                "NetworkInterfaces": [
+                    {
+                        "NetworkInterfaceId": "eni-0123456789abcdef0",
+                        "OwnerId": "222222222222",
+                    }
+                ]
+            },
+            {"Filters": expected_filters},
+        )
+        stubber.add_response(
+            "describe_instances",
+            {"Reservations": []},
+            {"Filters": expected_filters},
+        )
+
+        resolved = resolve_target(config, endpoint, ec2_client=ec2_client)
+        stubber.assert_no_pending_responses()
+
+    assert resolved.input_type == "eni"
+    assert resolved.resolved_identifier == "eni-0123456789abcdef0"
+    assert resolved.resolved_arn == (
+        "arn:aws:ec2:us-east-1:222222222222:network-interface/eni-0123456789abcdef0"
+    )
+
+
 def test_non_arn_direct_resolution_is_unaffected_without_account_identity() -> None:
     config, endpoint = build_config({"resource_id": "eni-0123456789abcdef0"})
     ec2_client = FakeEC2Client(
@@ -249,6 +285,56 @@ def test_resolve_target_fails_when_multiple_matches_are_found() -> None:
 
     with pytest.raises(SelectorResolutionError, match="matched multiple supported v1 targets"):
         resolve_target(config, endpoint, ec2_client=ec2_client)
+
+
+def test_resolve_target_fails_when_tag_selector_is_ambiguous_with_stubber() -> None:
+    config, endpoint = build_config({"tags": {"Name": "ambiguous"}})
+    ec2_client = boto3_client("ec2")
+    expected_filters = [{"Name": "tag:Name", "Values": ["ambiguous"]}]
+
+    with Stubber(ec2_client) as stubber:
+        stubber.add_response(
+            "describe_network_interfaces",
+            {
+                "NetworkInterfaces": [
+                    {
+                        "NetworkInterfaceId": "eni-0123456789abcdef0",
+                        "OwnerId": "222222222222",
+                    }
+                ]
+            },
+            {"Filters": expected_filters},
+        )
+        stubber.add_response(
+            "describe_instances",
+            {
+                "Reservations": [
+                    {
+                        "OwnerId": "222222222222",
+                        "Instances": [
+                            {
+                                "InstanceId": "i-0123456789abcdef0",
+                                "NetworkInterfaces": [
+                                    {
+                                        "NetworkInterfaceId": "eni-0fedcba9876543210",
+                                        "Attachment": {"DeviceIndex": 0},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            {"Filters": expected_filters},
+        )
+
+        with pytest.raises(
+            SelectorResolutionError,
+            match="matched multiple supported v1 targets",
+        ):
+            resolve_target(config, endpoint, ec2_client=ec2_client)
+
+        stubber.assert_no_pending_responses()
 
 
 def test_resolve_target_fails_when_instance_and_eni_share_same_tag_before_normalization() -> None:
@@ -406,6 +492,47 @@ def test_resolve_target_fails_for_unsupported_partition() -> None:
         match="only supports the standard commercial AWS partition",
     ):
         resolve_target(config, endpoint, ec2_client=FakeEC2Client())
+
+
+def test_resolve_unique_ec2_instance_by_resource_id_with_stubber() -> None:
+    config, endpoint = build_config({"resource_id": "i-0123456789abcdef0"})
+    ec2_client = boto3_client("ec2")
+
+    with Stubber(ec2_client) as stubber:
+        stubber.add_response(
+            "describe_instances",
+            {
+                "Reservations": [
+                    {
+                        "OwnerId": "222222222222",
+                        "Instances": [
+                            {
+                                "InstanceId": "i-0123456789abcdef0",
+                                "NetworkInterfaces": [
+                                    {
+                                        "NetworkInterfaceId": "eni-0123456789abcdef0",
+                                        "Attachment": {"DeviceIndex": 0},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            {"InstanceIds": ["i-0123456789abcdef0"]},
+        )
+
+        resolved = resolve_target(config, endpoint, ec2_client=ec2_client)
+        stubber.assert_no_pending_responses()
+
+    assert resolved.input_type == "ec2_instance"
+    assert resolved.input_identifier == "i-0123456789abcdef0"
+    assert resolved.resolved_identifier == "eni-0123456789abcdef0"
+    assert resolved.normalized is True
+    assert resolved.metadata["normalized_from_type"] == "ec2_instance"
+    assert resolved.resolved_arn == (
+        "arn:aws:ec2:us-east-1:222222222222:network-interface/eni-0123456789abcdef0"
+    )
 
 
 def test_resolve_target_fails_for_no_primary_eni() -> None:
